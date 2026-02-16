@@ -298,6 +298,59 @@ class Database:
         )
         return {row['dominant_emotion']: row['count'] for row in cursor.fetchall()}
 
+    def insert_eye_event(
+        self,
+        session_id: int,
+        timestamp: float,
+        left_pupil_x: float = None,
+        left_pupil_y: float = None,
+        right_pupil_x: float = None,
+        right_pupil_y: float = None,
+        gaze_x: float = None,
+        gaze_y: float = None,
+        left_eye_open: bool = None,
+        right_eye_open: bool = None,
+        head_pose_x: float = None,
+        head_pose_y: float = None,
+        head_pose_z: float = None,
+        is_calibrated: bool = False
+    ):
+        """Insert an eye tracking event"""
+        self.conn.execute(
+            """
+            INSERT INTO eye_events
+            (session_id, timestamp, left_pupil_x, left_pupil_y, right_pupil_x, right_pupil_y,
+             gaze_x, gaze_y, left_eye_open, right_eye_open,
+             head_pose_x, head_pose_y, head_pose_z, is_calibrated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (session_id, timestamp, left_pupil_x, left_pupil_y, right_pupil_x, right_pupil_y,
+             gaze_x, gaze_y, left_eye_open, right_eye_open,
+             head_pose_x, head_pose_y, head_pose_z, is_calibrated)
+        )
+        self.conn.commit()
+
+    def get_eye_events(self, session_id: int, calibrated_only: bool = False) -> list:
+        """Get all eye tracking events for a session"""
+        query = """
+            SELECT * FROM eye_events
+            WHERE session_id = ?
+        """
+        if calibrated_only:
+            query += " AND is_calibrated = 1"
+        query += " ORDER BY timestamp"
+
+        cursor = self.conn.execute(query, (session_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_eye_event_count(self, session_id: int) -> int:
+        """Get total eye event count for session"""
+        cursor = self.conn.execute(
+            "SELECT COUNT(*) as count FROM eye_events WHERE session_id = ?",
+            (session_id,)
+        )
+        return cursor.fetchone()['count']
+
     def close(self):
         """Close database connection"""
         if self.conn:

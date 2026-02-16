@@ -4,21 +4,23 @@ Sistema de seguimiento de interacciones humano-computador (HCI) para estudios de
 
 ## 🎯 Características
 
-### Prototipo Actual (v0.4) 🔥
+### Sistema Completo (v1.0) 🎉
 - ✅ **Mouse Tracking**: Captura movimientos, clicks y scroll
 - ✅ **Screenshot Capture**: Capturas periódicas de pantalla (mss - 10x más rápido)
 - ✅ **Audio Recording**: Grabación de audio en segmentos (sounddevice)
 - ✅ **Emotion Detection**: Análisis facial de 7 emociones + edad + género (DeepFace)
+- ✅ **Eye Tracking**: Seguimiento ocular con MediaPipe Face Mesh + calibración
 - ✅ **Almacenamiento SQLite**: Base de datos eficiente con modo WAL
 - ✅ **Generación de Heatmaps**: Visualizaciones de actividad
 - ✅ **Batch Processing**: Escritura optimizada en lotes
-- ✅ **Multi-tracker**: Sistema que coordina 4 trackers simultáneos
+- ✅ **Multi-tracker**: Sistema que coordina 5 trackers simultáneos
 
 ### Roadmap Futuro
-- 🔲 Eye Tracking (MediaPipe) - Próximo
 - 🔲 Dashboard Web (FastAPI)
 - 🔲 Real-time Analytics
-- 🔲 Emotion Timeline Visualization
+- 🔲 Gaze Heatmap Visualization
+- 🔲 Emotion Timeline Charts
+- 🔲 Export to common formats (CSV, JSON)
 
 ## 📁 Estructura del Proyecto
 
@@ -89,12 +91,12 @@ python demo_complete.py 120 5 60          # 2min, screenshot cada 5s, audio cada
 python demo_complete.py 300 10 120        # 5min, screenshot cada 10s, audio cada 2min
 ```
 
-### Demo DEFINITIVO: TODOS los Trackers 🚀😊
+### Demo DEFINITIVO: Mouse + Screenshots + Audio + Emotions 🚀😊
 ```bash
 python demo_full.py [duración]
 
 # Ejemplos:
-python demo_full.py          # 2 minutos con TODOS los trackers
+python demo_full.py          # 2 minutos con 4 trackers
 python demo_full.py 300      # 5 minutos de tracking completo
 
 # Incluye:
@@ -104,10 +106,27 @@ python demo_full.py 300      # 5 minutos de tracking completo
 # 😊 Emotion detection cada 0.5s (7 emociones + edad + género)
 ```
 
+### Demo ULTIMATE: ¡LOS 5 TRACKERS! 🎯👁️🚀
+```bash
+python demo_ultimate.py [duración]
+
+# Ejemplos:
+python demo_ultimate.py          # 3 minutos - SISTEMA COMPLETO
+python demo_ultimate.py 300      # 5 minutos
+
+# Incluye TODO:
+# 🖱️  Mouse tracking
+# 📸 Screenshots cada 10s
+# 🎤 Audio en segmentos de 60s
+# 😊 Emotion detection @ 2 Hz (7 emociones)
+# 👁️  Eye tracking @ 30 Hz con calibración opcional
+```
+
 **Notas Importantes**:
-- Primera ejecución descarga modelos de DeepFace (~100MB)
+- Primera ejecución descarga modelos DeepFace + MediaPipe (~150MB)
 - Requiere permisos de cámara y micrófono
-- Si falla audio o emociones, continúa con los demás trackers
+- Eye tracking funciona mejor con calibración (9 puntos)
+- Si falla algún tracker, continúa con los demás
 
 ### Durante el tracking:
 - Mueve el mouse por toda la pantalla

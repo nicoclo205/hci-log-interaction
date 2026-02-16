@@ -97,6 +97,30 @@ CREATE INDEX IF NOT EXISTS idx_emotion_session ON emotion_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_emotion_timestamp ON emotion_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_emotion_dominant ON emotion_events(dominant_emotion);
 
+-- Eye tracking events table
+CREATE TABLE IF NOT EXISTS eye_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    timestamp REAL NOT NULL,
+    left_pupil_x REAL,
+    left_pupil_y REAL,
+    right_pupil_x REAL,
+    right_pupil_y REAL,
+    gaze_x REAL,
+    gaze_y REAL,
+    left_eye_open BOOLEAN,
+    right_eye_open BOOLEAN,
+    head_pose_x REAL,
+    head_pose_y REAL,
+    head_pose_z REAL,
+    is_calibrated BOOLEAN DEFAULT 0,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_eye_session ON eye_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_eye_timestamp ON eye_events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_eye_calibrated ON eye_events(is_calibrated);
+
 -- Database metadata
 CREATE TABLE IF NOT EXISTS db_metadata (
     key TEXT PRIMARY KEY,
