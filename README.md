@@ -4,19 +4,21 @@ Sistema de seguimiento de interacciones humano-computador (HCI) para estudios de
 
 ## 🎯 Características
 
-### Prototipo Actual (v0.1)
+### Prototipo Actual (v0.4) 🔥
 - ✅ **Mouse Tracking**: Captura movimientos, clicks y scroll
+- ✅ **Screenshot Capture**: Capturas periódicas de pantalla (mss - 10x más rápido)
+- ✅ **Audio Recording**: Grabación de audio en segmentos (sounddevice)
+- ✅ **Emotion Detection**: Análisis facial de 7 emociones + edad + género (DeepFace)
 - ✅ **Almacenamiento SQLite**: Base de datos eficiente con modo WAL
 - ✅ **Generación de Heatmaps**: Visualizaciones de actividad
 - ✅ **Batch Processing**: Escritura optimizada en lotes
+- ✅ **Multi-tracker**: Sistema que coordina 4 trackers simultáneos
 
 ### Roadmap Futuro
-- 🔲 Eye Tracking (MediaPipe)
-- 🔲 Emotion Detection (DeepFace)
-- 🔲 Audio Capture
-- 🔲 Screenshot Capture
+- 🔲 Eye Tracking (MediaPipe) - Próximo
 - 🔲 Dashboard Web (FastAPI)
 - 🔲 Real-time Analytics
+- 🔲 Emotion Timeline Visualization
 
 ## 📁 Estructura del Proyecto
 
@@ -58,15 +60,54 @@ pip install -r requirements.txt
 
 ## 💻 Uso
 
-### Demo Rápido (30 segundos)
+### Demo Básico: Solo Mouse Tracking
 ```bash
-python demo_tracking.py
-```
+python demo_tracking.py [duración]
 
-### Demo con duración personalizada
-```bash
+# Ejemplos:
+python demo_tracking.py     # 30 segundos (default)
 python demo_tracking.py 60  # 60 segundos
 ```
+
+### Demo Completo: Mouse + Screenshots 🆕
+```bash
+python demo_with_screenshots.py [duración] [intervalo_screenshots]
+
+# Ejemplos:
+python demo_with_screenshots.py           # 30s, screenshot cada 5s
+python demo_with_screenshots.py 60 3      # 60s, screenshot cada 3s
+python demo_with_screenshots.py 120 10    # 2min, screenshot cada 10s
+```
+
+### Demo Full: Mouse + Screenshots + Audio 🔥
+```bash
+python demo_complete.py [duración] [screenshot_interval] [audio_segment_duration]
+
+# Ejemplos:
+python demo_complete.py                   # 60s, screenshot cada 5s, audio cada 30s
+python demo_complete.py 120 5 60          # 2min, screenshot cada 5s, audio cada 60s
+python demo_complete.py 300 10 120        # 5min, screenshot cada 10s, audio cada 2min
+```
+
+### Demo DEFINITIVO: TODOS los Trackers 🚀😊
+```bash
+python demo_full.py [duración]
+
+# Ejemplos:
+python demo_full.py          # 2 minutos con TODOS los trackers
+python demo_full.py 300      # 5 minutos de tracking completo
+
+# Incluye:
+# 🖱️  Mouse tracking
+# 📸 Screenshots cada 10s
+# 🎤 Audio en segmentos de 60s
+# 😊 Emotion detection cada 0.5s (7 emociones + edad + género)
+```
+
+**Notas Importantes**:
+- Primera ejecución descarga modelos de DeepFace (~100MB)
+- Requiere permisos de cámara y micrófono
+- Si falla audio o emociones, continúa con los demás trackers
 
 ### Durante el tracking:
 - Mueve el mouse por toda la pantalla

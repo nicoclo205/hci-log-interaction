@@ -141,6 +141,163 @@ class Database:
         )
         return cursor.fetchone()['count']
 
+    def insert_screenshot(
+        self,
+        session_id: int,
+        timestamp: float,
+        file_path: str,
+        file_size: int,
+        width: int,
+        height: int,
+        format: str = 'png'
+    ):
+        """Insert a screenshot record"""
+        self.conn.execute(
+            """
+            INSERT INTO screenshots
+            (session_id, timestamp, file_path, file_size, width, height, format)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (session_id, timestamp, file_path, file_size, width, height, format)
+        )
+        self.conn.commit()
+
+    def get_screenshots(self, session_id: int) -> list:
+        """Get all screenshots for a session"""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM screenshots
+            WHERE session_id = ?
+            ORDER BY timestamp
+            """,
+            (session_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_screenshot_count(self, session_id: int) -> int:
+        """Get total screenshot count for session"""
+        cursor = self.conn.execute(
+            "SELECT COUNT(*) as count FROM screenshots WHERE session_id = ?",
+            (session_id,)
+        )
+        return cursor.fetchone()['count']
+
+    def insert_audio_segment(
+        self,
+        session_id: int,
+        start_timestamp: float,
+        end_timestamp: float,
+        duration: float,
+        file_path: str,
+        sample_rate: int,
+        channels: int,
+        file_size: int
+    ):
+        """Insert an audio segment record"""
+        self.conn.execute(
+            """
+            INSERT INTO audio_segments
+            (session_id, start_timestamp, end_timestamp, duration,
+             file_path, sample_rate, channels, file_size)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (session_id, start_timestamp, end_timestamp, duration,
+             file_path, sample_rate, channels, file_size)
+        )
+        self.conn.commit()
+
+    def get_audio_segments(self, session_id: int) -> list:
+        """Get all audio segments for a session"""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM audio_segments
+            WHERE session_id = ?
+            ORDER BY start_timestamp
+            """,
+            (session_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_audio_segment_count(self, session_id: int) -> int:
+        """Get total audio segment count for session"""
+        cursor = self.conn.execute(
+            "SELECT COUNT(*) as count FROM audio_segments WHERE session_id = ?",
+            (session_id,)
+        )
+        return cursor.fetchone()['count']
+
+    def get_total_audio_duration(self, session_id: int) -> float:
+        """Get total audio duration for session in seconds"""
+        cursor = self.conn.execute(
+            "SELECT SUM(duration) as total FROM audio_segments WHERE session_id = ?",
+            (session_id,)
+        )
+        result = cursor.fetchone()['total']
+        return result if result else 0.0
+
+    def insert_emotion_event(
+        self,
+        session_id: int,
+        timestamp: float,
+        angry: float,
+        disgust: float,
+        fear: float,
+        happy: float,
+        sad: float,
+        surprise: float,
+        neutral: float,
+        dominant_emotion: str,
+        face_confidence: float = None,
+        age: int = None,
+        gender: str = None
+    ):
+        """Insert an emotion detection event"""
+        self.conn.execute(
+            """
+            INSERT INTO emotion_events
+            (session_id, timestamp, angry, disgust, fear, happy, sad, surprise, neutral,
+             dominant_emotion, face_confidence, age, gender)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (session_id, timestamp, angry, disgust, fear, happy, sad, surprise, neutral,
+             dominant_emotion, face_confidence, age, gender)
+        )
+        self.conn.commit()
+
+    def get_emotion_events(self, session_id: int) -> list:
+        """Get all emotion events for a session"""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM emotion_events
+            WHERE session_id = ?
+            ORDER BY timestamp
+            """,
+            (session_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_emotion_event_count(self, session_id: int) -> int:
+        """Get total emotion event count for session"""
+        cursor = self.conn.execute(
+            "SELECT COUNT(*) as count FROM emotion_events WHERE session_id = ?",
+            (session_id,)
+        )
+        return cursor.fetchone()['count']
+
+    def get_dominant_emotions_summary(self, session_id: int) -> dict:
+        """Get summary of dominant emotions for session"""
+        cursor = self.conn.execute(
+            """
+            SELECT dominant_emotion, COUNT(*) as count
+            FROM emotion_events
+            WHERE session_id = ?
+            GROUP BY dominant_emotion
+            ORDER BY count DESC
+            """,
+            (session_id,)
+        )
+        return {row['dominant_emotion']: row['count'] for row in cursor.fetchall()}
+
     def close(self):
         """Close database connection"""
         if self.conn:
