@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Screenshot tracker usando mss (muy rápido)"""
 
 import time
@@ -53,12 +54,15 @@ class ScreenshotTracker:
         print(f"   Interval: {self.interval}s")
         print(f"   Format: {self.format}")
 
-        self.sct = mss.mss()
+        # NO crear mss aquí - se creará en cada capture() para evitar problemas de threading
+        # En Windows, mss usa _thread._local que no funciona bien entre threads
         self.running = True
 
-        # Obtener info del monitor
-        monitor_info = self.sct.monitors[self.monitor]
-        print(f"   Monitor: {monitor_info['width']}x{monitor_info['height']}")
+        # Obtener info del monitor temporalmente
+        with mss.mss() as sct:
+            monitor_info = sct.monitors[self.monitor]
+            print(f"   Monitor: {monitor_info['width']}x{monitor_info['height']}")
+
         print(f"✓ Screenshot tracker started")
 
     def capture(self) -> bool:
@@ -68,21 +72,24 @@ class ScreenshotTracker:
         Returns:
             True si la captura fue exitosa, False en caso contrario
         """
-        if not self.running or not self.sct:
+        if not self.running:
             return False
 
         try:
             timestamp = time.time()
 
-            # Capturar screenshot
-            screenshot = self.sct.grab(self.sct.monitors[self.monitor])
+            # Crear mss dentro de cada capture() para evitar problemas de threading
+            # En Windows, mss usa thread-local storage que no funciona bien entre threads
+            with mss.mss() as sct:
+                # Capturar screenshot
+                screenshot = sct.grab(sct.monitors[self.monitor])
 
-            # Convertir a PIL Image
-            img = Image.frombytes(
-                'RGB',
-                screenshot.size,
-                screenshot.rgb
-            )
+                # Convertir a PIL Image
+                img = Image.frombytes(
+                    'RGB',
+                    screenshot.size,
+                    screenshot.rgb
+                )
 
             # Generar nombre de archivo
             filename = f"screenshot_{self.session_id}_{int(timestamp)}.{self.format}"
@@ -145,11 +152,6 @@ class ScreenshotTracker:
     def stop(self):
         """Detener captura de screenshots"""
         self.running = False
-
-        if self.sct:
-            self.sct.close()
-            self.sct = None
-
         print(f"✓ Screenshot tracker stopped ({self.screenshots_captured} screenshots captured)")
 
     def get_stats(self):

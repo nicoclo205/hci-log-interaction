@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Generador de heatmaps a partir de eventos de mouse"""
 
 import numpy as np

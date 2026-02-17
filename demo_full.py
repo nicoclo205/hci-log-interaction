@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Demo FULL: Mouse + Screenshots + Audio + Emotions
+Demo FULL v2.0: Mouse + Screenshots Inteligentes + Audio + Emotions
 
-¡Todos los trackers implementados funcionando juntos!
+Sistema completo de HCI Logging con análisis de emociones
 
 Uso:
     python demo_full.py [duración]
@@ -17,20 +18,45 @@ import uuid
 import signal
 from pathlib import Path
 from datetime import datetime
+import mss
+import json
+
+# Fix para encoding en Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Añadir el directorio raíz al path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from hci_logger.storage.database import Database
 from hci_logger.trackers.mouse_tracker import MouseTracker
-from hci_logger.trackers.screenshot_tracker import ScreenshotTrackerAsync
+from hci_logger.trackers.event_screenshot_tracker import EventBasedScreenshotTracker
 from hci_logger.trackers.audio_tracker import AudioTrackerAsync
 from hci_logger.trackers.emotion_tracker import EmotionTrackerAsync
 from hci_logger.processing.heatmap import HeatmapGenerator
+from hci_logger.processing.heatmap_overlay import HeatmapOverlayGenerator
+
+
+def get_screen_dimensions():
+    """Detecta las dimensiones completas del espacio de trabajo"""
+    with mss.mss() as sct:
+        monitor = sct.monitors[0]
+        width = monitor['width']
+        height = monitor['height']
+        left = monitor['left']
+        top = monitor['top']
+
+        print(f"📐 Dimensiones detectadas del espacio de trabajo:")
+        print(f"   Resolución completa: {width}x{height}")
+        print(f"   Origen: ({left}, {top})")
+
+        return width, height, left, top
 
 
 class FullHCIDemo:
-    """Demo completo con TODOS los trackers HCI"""
+    """Demo completo v2.0: Mouse + Screenshots Inteligentes + Audio + Emotions"""
 
     def __init__(self, duration: int = 120):
         self.duration = duration
@@ -38,6 +64,8 @@ class FullHCIDemo:
         self.db = Database()
         self.session_id = None
         self.session_uuid = None
+        self.screen_width = None
+        self.screen_height = None
 
         # Trackers
         self.mouse_tracker = None
@@ -62,6 +90,7 @@ class FullHCIDemo:
 
     def _on_mouse_event(self, event: dict):
         """Callback para eventos de mouse"""
+        # 1. Guardar en buffer para DB
         self.event_buffer.append((
             event['session_id'],
             event['timestamp'],
@@ -77,8 +106,15 @@ class FullHCIDemo:
         if len(self.event_buffer) >= self.buffer_size:
             self._flush_mouse_buffer()
 
+        # 2. Pasar al screenshot tracker para que decida si captura
+        if self.screenshot_tracker:
+            self.screenshot_tracker.on_mouse_event(event)
+
     def _on_screenshot_captured(self, screenshot_info: dict):
-        """Callback para screenshots"""
+        """Callback para screenshots con metadata de eventos"""
+        # Extraer metadata del evento trigger
+        trigger_metadata = screenshot_info.pop('trigger_metadata', {})
+
         self.db.insert_screenshot(
             session_id=screenshot_info['session_id'],
             timestamp=screenshot_info['timestamp'],
@@ -86,7 +122,11 @@ class FullHCIDemo:
             file_size=screenshot_info['file_size'],
             width=screenshot_info['width'],
             height=screenshot_info['height'],
-            format=screenshot_info['format']
+            format=screenshot_info['format'],
+            trigger_event_type=screenshot_info.get('trigger_event_type'),
+            trigger_x=screenshot_info.get('trigger_x'),
+            trigger_y=screenshot_info.get('trigger_y'),
+            trigger_metadata=json.dumps(trigger_metadata) if trigger_metadata else None
         )
 
     def _on_audio_segment(self, segment_info: dict):
@@ -129,14 +169,20 @@ class FullHCIDemo:
     def start(self):
         """Iniciar tracking completo"""
         print("=" * 80)
-        print("🚀 HCI LOGGER - DEMO FULL: TODOS LOS TRACKERS")
+        print("🚀 HCI LOGGER - DEMO FULL v2.0: SISTEMA COMPLETO HCI")
         print("=" * 80)
         print()
         print("  Componentes activos:")
-        print("    🖱️  Mouse Tracking       - Movimientos, clicks, scroll")
-        print("    📸 Screenshot Capture   - Capturas cada 10s")
-        print("    🎤 Audio Recording      - Segmentos de 60s")
-        print("    😊 Emotion Detection    - Análisis cada 2s (7 emociones)")
+        print("    🖱️  Mouse Tracking          - Movimientos, clicks, scroll")
+        print("    📸 Screenshots Inteligentes - En clicks + scrolls (>100px)")
+        print("    🎤 Audio Recording         - Segmentos de 60s (Think-Aloud)")
+        print("    😊 Emotion Detection       - Análisis cada 2s (7 emociones + edad + género)")
+        print()
+
+        # Detectar dimensiones de pantalla
+        screen_width, screen_height, _, _ = get_screen_dimensions()
+        self.screen_width = screen_width
+        self.screen_height = screen_height
         print()
 
         # Inicializar base de datos
@@ -148,10 +194,10 @@ class FullHCIDemo:
         self.session_id = self.db.create_session(
             session_uuid=self.session_uuid,
             participant_id="demo_user",
-            experiment_id="full_hci_demo",
-            target_url="facebook.com",
-            screen_width=1920,
-            screen_height=1080
+            experiment_id="full_hci_demo_v2",
+            target_url="test_application",
+            screen_width=screen_width,
+            screen_height=screen_height
         )
 
         print(f"✓ Sesión creada: {self.session_uuid}")
@@ -178,13 +224,15 @@ class FullHCIDemo:
         )
         self.mouse_tracker.start()
 
-        # 2. Screenshot Tracker
-        self.screenshot_tracker = ScreenshotTrackerAsync(
+        # 2. Event-Based Screenshot Tracker (Inteligente)
+        self.screenshot_tracker = EventBasedScreenshotTracker(
             session_id=self.session_id,
             on_screenshot_callback=self._on_screenshot_captured,
             output_dir=screenshot_dir,
-            interval=10,  # Cada 10 segundos
-            format='png'
+            scroll_threshold=100,  # Screenshot cuando scroll > 100px
+            cooldown=0.5,          # Mínimo 0.5s entre screenshots
+            format='png',
+            quality=85
         )
         self.screenshot_tracker.start()
 
@@ -334,8 +382,17 @@ class FullHCIDemo:
             total_size = sum(s['file_size'] for s in screenshots)
             total_size_mb = total_size / (1024 * 1024)
 
-            print(f"\n📸 SCREENSHOTS:")
+            # Contar por tipo de trigger
+            trigger_types = {}
+            for s in screenshots:
+                trigger = s.get('trigger_event_type', 'unknown')
+                trigger_types[trigger] = trigger_types.get(trigger, 0) + 1
+
+            print(f"\n📸 SCREENSHOTS (Basados en Eventos):")
             print(f"  Total capturados: {len(screenshots)}")
+            print(f"  Por tipo de trigger:")
+            for trigger, count in trigger_types.items():
+                print(f"    - {trigger}: {count}")
             print(f"  Tamaño total: {total_size_mb:.2f} MB")
             print(f"  Directorio: data/sessions/{self.session_uuid}/screenshots/")
 
@@ -374,17 +431,20 @@ class FullHCIDemo:
                 bar = "█" * int(percentage / 5)  # Barra visual
                 print(f"    {emoji} {emotion:10} : {bar} {percentage:5.1f}% ({count})")
 
-        # === HEATMAPS ===
+        # === HEATMAPS Y OVERLAYS ===
         print()
         if events:
-            print("🎨 Generando heatmaps...")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_dir = Path("output")
             output_dir.mkdir(exist_ok=True)
 
-            generator = HeatmapGenerator(screen_width=1920, screen_height=1080)
+            # 1. Heatmap general
+            print("🎨 Generando heatmap general...")
+            generator = HeatmapGenerator(
+                screen_width=self.screen_width,
+                screen_height=self.screen_height
+            )
 
-            # Heatmap general
             heatmap_path = output_dir / f"heatmap_full_{timestamp}.png"
             generator.generate_from_events(
                 events=events,
@@ -392,17 +452,63 @@ class FullHCIDemo:
                 blur_radius=20
             )
 
-            # Comparación
             comparison_path = output_dir / f"comparison_full_{timestamp}.png"
             generator.generate_comparison(
                 events=events,
                 output_path=comparison_path
             )
 
+            print(f"✓ Heatmap general: {heatmap_path.name}")
+            print(f"✓ Comparación: {comparison_path.name}")
+
+            # 2. Generar overlays sobre screenshots
+            if screenshots:
+                print()
+                overlay_generator = HeatmapOverlayGenerator(
+                    screen_width=self.screen_width,
+                    screen_height=self.screen_height
+                )
+
+                overlay_dir = output_dir / f"overlays_full_{timestamp}"
+
+                # Generar todos los overlays
+                overlay_paths = overlay_generator.generate_all_overlays(
+                    screenshots=screenshots,
+                    all_events=events,
+                    output_dir=overlay_dir,
+                    time_window=5.0,
+                    blur_radius=25,
+                    alpha=0.6,
+                    show_clicks=True,
+                    click_radius=20
+                )
+
+                # Crear grilla de comparación
+                if overlay_paths:
+                    grid_path = output_dir / f"overlay_grid_full_{timestamp}.png"
+                    overlay_generator.create_comparison_grid(
+                        screenshots=screenshots,
+                        overlay_paths=overlay_paths,
+                        output_path=grid_path,
+                        max_per_row=2
+                    )
+
+                    print(f"\n✓ Overlays generados en: {overlay_dir}/")
+                    print(f"✓ Grilla de comparación: {grid_path.name}")
+
             print()
-            print("✓ Heatmaps generados:")
-            print(f"  - {heatmap_path.name}")
-            print(f"  - {comparison_path.name}")
+            print("=" * 80)
+            print("📊 RESUMEN DE VISUALIZACIONES")
+            print("=" * 80)
+            print(f"\n1. Heatmaps Generales:")
+            print(f"   - {heatmap_path}")
+            print(f"   - {comparison_path}")
+
+            if screenshots:
+                print(f"\n2. Heatmap Overlays ({len(overlay_paths)} screenshots):")
+                print(f"   - Carpeta: {overlay_dir}/")
+                print(f"   - Grilla: {grid_path}")
+                print(f"\n💡 Los overlays correlacionan contexto visual + actividad + emociones")
 
         # === RESUMEN FINAL ===
         print()
@@ -411,11 +517,18 @@ class FullHCIDemo:
         print("=" * 80)
         print()
         print("📂 Todos los datos almacenados en:")
-        print(f"  - Base de datos: data/hci_logger.db")
-        print(f"  - Archivos de sesión: data/sessions/{self.session_uuid}/")
-        print(f"  - Heatmaps: output/")
+        print(f"  - Base de datos: data/hci_logger.db (con metadata completa)")
+        print(f"  - Screenshots: data/sessions/{self.session_uuid}/screenshots/")
+        print(f"  - Audio: data/sessions/{self.session_uuid}/audio/")
+        print(f"  - Heatmaps y Overlays: output/")
         print()
-        print("💡 Consulta la base de datos para análisis detallados:")
+        print("💡 Análisis Multimodal Disponible:")
+        print("  - Correlacionar emociones con eventos de interacción")
+        print("  - Reproducir audio sincronizado con screenshots")
+        print("  - Identificar momentos de frustración (emociones + clics repetitivos)")
+        print("  - Analizar patrones de comportamiento visual + emocional")
+        print()
+        print("🔍 Consulta la base de datos:")
         print(f"   sqlite3 data/hci_logger.db")
         print()
 

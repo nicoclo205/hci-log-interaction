@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Demo completo: Mouse + Screenshots Inteligentes + Audio
+Demo de tracking con Screenshots Inteligentes basados en eventos
 
-Screenshots basados en eventos (clicks/scrolls) + Audio tracking
+Este demo captura screenshots SOLO cuando:
+- El usuario hace click
+- El usuario hace scroll significativo (>100px acumulado)
 
 Uso:
-    python demo_complete.py [duración] [audio_segment_duration]
+    python demo_event_screenshots.py [duración_en_segundos]
 
 Ejemplo:
-    python demo_complete.py 60 30  # 60s total, audio cada 30s
+    python demo_event_screenshots.py 60  # 60 segundos de tracking
 """
 
 import sys
@@ -33,7 +35,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 from hci_logger.storage.database import Database
 from hci_logger.trackers.mouse_tracker import MouseTracker
 from hci_logger.trackers.event_screenshot_tracker import EventBasedScreenshotTracker
-from hci_logger.trackers.audio_tracker import AudioTrackerAsync
 from hci_logger.processing.heatmap import HeatmapGenerator
 from hci_logger.processing.heatmap_overlay import HeatmapOverlayGenerator
 
@@ -58,17 +59,11 @@ def get_screen_dimensions():
         return width, height, left, top
 
 
-class CompleteDemo:
-    """Demo completo: Mouse + Screenshots Inteligentes + Audio"""
+class EventScreenshotDemo:
+    """Demo de tracking con screenshots basados en eventos"""
 
-    def __init__(
-        self,
-        duration: int = 60,
-        audio_segment_duration: int = 30
-    ):
+    def __init__(self, duration: int = 60):
         self.duration = duration
-        self.audio_segment_duration = audio_segment_duration
-
         self.db = Database()
         self.session_id = None
         self.session_uuid = None
@@ -78,7 +73,6 @@ class CompleteDemo:
         # Trackers
         self.mouse_tracker = None
         self.screenshot_tracker = None
-        self.audio_tracker = None
 
         self.running = False
 
@@ -97,7 +91,7 @@ class CompleteDemo:
 
     def _on_mouse_event(self, event: dict):
         """Callback para eventos de mouse"""
-        # 1. Guardar en buffer para DB
+        # 1. Guardar evento en buffer para la DB
         self.event_buffer.append((
             event['session_id'],
             event['timestamp'],
@@ -113,15 +107,16 @@ class CompleteDemo:
         if len(self.event_buffer) >= self.buffer_size:
             self._flush_mouse_buffer()
 
-        # 2. Pasar al screenshot tracker para que decida si captura
+        # 2. Pasar evento al screenshot tracker para que decida si captura
         if self.screenshot_tracker:
             self.screenshot_tracker.on_mouse_event(event)
 
     def _on_screenshot_captured(self, screenshot_info: dict):
-        """Callback para screenshots con metadata de eventos"""
+        """Callback para screenshots capturados"""
         # Extraer metadata del evento trigger
         trigger_metadata = screenshot_info.pop('trigger_metadata', {})
 
+        # Guardar en DB
         self.db.insert_screenshot(
             session_id=screenshot_info['session_id'],
             timestamp=screenshot_info['timestamp'],
@@ -136,19 +131,6 @@ class CompleteDemo:
             trigger_metadata=json.dumps(trigger_metadata) if trigger_metadata else None
         )
 
-    def _on_audio_segment(self, segment_info: dict):
-        """Callback para segmentos de audio"""
-        self.db.insert_audio_segment(
-            session_id=segment_info['session_id'],
-            start_timestamp=segment_info['start_timestamp'],
-            end_timestamp=segment_info['end_timestamp'],
-            duration=segment_info['duration'],
-            file_path=segment_info['file_path'],
-            sample_rate=segment_info['sample_rate'],
-            channels=segment_info['channels'],
-            file_size=segment_info['file_size']
-        )
-
     def _flush_mouse_buffer(self):
         """Escribir buffer de mouse a base de datos"""
         if self.event_buffer:
@@ -156,15 +138,10 @@ class CompleteDemo:
             self.event_buffer.clear()
 
     def start(self):
-        """Iniciar tracking completo"""
-        print("=" * 75)
-        print("🖱️📸🎤 HCI LOGGER - DEMO COMPLETO v2.0")
-        print("=" * 75)
-        print()
-        print("  Trackers activos:")
-        print("    🖱️  Mouse Tracking")
-        print("    📸 Screenshots Inteligentes (clicks + scrolls)")
-        print("    🎤 Audio Recording (Think-Aloud Protocol)")
+        """Iniciar tracking"""
+        print("=" * 70)
+        print("🖱️📸 HCI LOGGER - SCREENSHOTS INTELIGENTES (Basados en Eventos)")
+        print("=" * 70)
         print()
 
         # Detectar dimensiones de pantalla
@@ -182,8 +159,8 @@ class CompleteDemo:
         self.session_id = self.db.create_session(
             session_uuid=self.session_uuid,
             participant_id="demo_user",
-            experiment_id="complete_hci_demo",
-            target_url="test_application",
+            experiment_id="event_screenshot_test",
+            target_url="test_page",
             screen_width=screen_width,
             screen_height=screen_height
         )
@@ -192,19 +169,11 @@ class CompleteDemo:
         print(f"  ID: {self.session_id}")
         print()
 
-        # Configurar directorios
-        session_data_dir = Path("data/sessions") / self.session_uuid
-        screenshot_dir = session_data_dir / "screenshots"
-        audio_dir = session_data_dir / "audio"
-
+        # Configurar directorio de screenshots
+        screenshot_dir = Path("data/screenshots") / self.session_uuid
         screenshot_dir.mkdir(parents=True, exist_ok=True)
-        audio_dir.mkdir(parents=True, exist_ok=True)
 
-        # Iniciar trackers
-        print("🚀 Iniciando trackers...")
-        print()
-
-        # 1. Mouse Tracker
+        # Iniciar mouse tracker
         self.mouse_tracker = MouseTracker(
             session_id=self.session_id,
             on_event_callback=self._on_mouse_event,
@@ -212,35 +181,23 @@ class CompleteDemo:
         )
         self.mouse_tracker.start()
 
-        # 2. Event-Based Screenshot Tracker (Inteligente)
+        # Iniciar screenshot tracker basado en eventos
         self.screenshot_tracker = EventBasedScreenshotTracker(
             session_id=self.session_id,
             on_screenshot_callback=self._on_screenshot_captured,
             output_dir=screenshot_dir,
-            scroll_threshold=100,  # Screenshot cuando scroll > 100px
+            scroll_threshold=100,  # 100px de scroll acumulado
             cooldown=0.5,          # Mínimo 0.5s entre screenshots
             format='png',
             quality=85
         )
         self.screenshot_tracker.start()
 
-        # 3. Audio Tracker
-        try:
-            self.audio_tracker = AudioTrackerAsync(
-                session_id=self.session_id,
-                on_segment_callback=self._on_audio_segment,
-                output_dir=audio_dir,
-                segment_duration=self.audio_segment_duration,
-                sample_rate=44100,
-                channels=1
-            )
-            self.audio_tracker.start()
-        except Exception as e:
-            print(f"⚠️  Audio tracker falló (continuando sin audio): {e}")
-            self.audio_tracker = None
-
         print()
         print(f"⏱️  Tracking iniciado por {self.duration} segundos...")
+        print(f"   🖱️  Mouse tracking activo")
+        print(f"   📸 Screenshots en clicks y scrolls (>100px)")
+        print(f"   💡 Haz clicks y scrolls para ver screenshots capturados!")
         print(f"   Presiona Ctrl+C para detener antes")
         print()
 
@@ -250,7 +207,6 @@ class CompleteDemo:
         start_time = time.time()
         last_update = start_time
         last_screenshot_count = 0
-        last_audio_count = 0
 
         while self.running and (time.time() - start_time) < self.duration:
             time.sleep(0.5)
@@ -262,7 +218,6 @@ class CompleteDemo:
                 # Obtener contadores
                 mouse_count = self.db.get_event_count(self.session_id)
                 screenshot_count = self.db.get_screenshot_count(self.session_id)
-                audio_count = self.db.get_audio_segment_count(self.session_id)
 
                 # Barra de progreso
                 progress = elapsed / self.duration
@@ -270,18 +225,8 @@ class CompleteDemo:
                 filled = int(bar_length * progress)
                 bar = "█" * filled + "░" * (bar_length - filled)
 
-                # Indicadores de nuevo contenido
-                indicators = ""
-                if screenshot_count > last_screenshot_count:
-                    indicators += " 📸"
-                    last_screenshot_count = screenshot_count
-                if audio_count > last_audio_count:
-                    indicators += " 🎤"
-                    last_audio_count = audio_count
-
                 print(f"\r  [{bar}] {elapsed}/{self.duration}s | "
-                      f"Mouse: {mouse_count} | Screens: {screenshot_count} | "
-                      f"Audio: {audio_count}{indicators}",
+                      f"Mouse: {mouse_count} | Screenshots: {screenshot_count}",
                       end="", flush=True)
 
                 last_update = time.time()
@@ -290,11 +235,8 @@ class CompleteDemo:
         self.stop()
 
     def stop(self):
-        """Detener todos los trackers y generar reportes"""
+        """Detener tracking y generar reportes"""
         self.running = False
-
-        print()
-        print("⏹️  Deteniendo trackers...")
 
         # Detener trackers
         if self.mouse_tracker:
@@ -303,9 +245,6 @@ class CompleteDemo:
         if self.screenshot_tracker:
             self.screenshot_tracker.stop()
 
-        if self.audio_tracker:
-            self.audio_tracker.stop()
-
         # Flush buffer final
         self._flush_mouse_buffer()
 
@@ -313,20 +252,13 @@ class CompleteDemo:
         if self.session_id:
             self.db.end_session(self.session_id)
 
-        # Generar reporte completo
-        self._generate_report()
-
-        # Cerrar base de datos
-        self.db.close()
-
-    def _generate_report(self):
-        """Generar reporte completo de la sesión"""
+        # Estadísticas
         print()
-        print("=" * 75)
-        print("📊 REPORTE COMPLETO DE LA SESIÓN")
-        print("=" * 75)
+        print("=" * 70)
+        print("📈 ESTADÍSTICAS DE LA SESIÓN")
+        print("=" * 70)
 
-        # === MOUSE TRACKING ===
+        # Mouse events
         total_events = self.db.get_event_count(self.session_id)
         events = self.db.get_mouse_events(self.session_id)
 
@@ -340,7 +272,7 @@ class CompleteDemo:
         print(f"  - Clicks: {click_count}")
         print(f"  - Scrolls: {scroll_count}")
 
-        # === SCREENSHOTS ===
+        # Screenshots
         screenshots = self.db.get_screenshots(self.session_id)
         screenshot_count = len(screenshots)
 
@@ -362,46 +294,34 @@ class CompleteDemo:
                 print(f"    - {trigger}: {count}")
             print(f"  Tamaño total: {total_size_mb:.2f} MB")
             print(f"  Tamaño promedio: {avg_size / 1024:.2f} KB")
-            print(f"  Directorio: data/sessions/{self.session_uuid}/screenshots/")
+            print(f"  Directorio: data/screenshots/{self.session_uuid}/")
+        else:
+            print(f"\n📸 SCREENSHOTS:")
+            print(f"  ⚠️  No se capturaron screenshots")
+            print(f"  💡 Tip: Haz clicks o scrolls durante el tracking")
 
-        # === AUDIO ===
-        audio_segments = self.db.get_audio_segments(self.session_id)
-        audio_count = len(audio_segments)
-
-        if audio_count > 0:
-            total_duration = self.db.get_total_audio_duration(self.session_id)
-            total_size = sum(s['file_size'] for s in audio_segments)
-            total_size_mb = total_size / (1024 * 1024)
-
-            print(f"\n🎤 AUDIO:")
-            print(f"  Total de segmentos: {audio_count}")
-            print(f"  Duración total: {total_duration:.1f} segundos ({total_duration/60:.1f} min)")
-            print(f"  Tamaño total: {total_size_mb:.2f} MB")
-            print(f"  Sample rate: {audio_segments[0]['sample_rate']} Hz")
-            print(f"  Directorio: data/sessions/{self.session_uuid}/audio/")
-
-        # === HEATMAPS Y OVERLAYS ===
+        # Generar heatmaps y overlays
         print()
         if events:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_dir = Path("output")
             output_dir.mkdir(exist_ok=True)
 
-            # 1. Heatmap general
+            # 1. Heatmap general (como antes)
             print("🎨 Generando heatmap general...")
             generator = HeatmapGenerator(
                 screen_width=self.screen_width,
                 screen_height=self.screen_height
             )
 
-            heatmap_path = output_dir / f"heatmap_complete_{timestamp}.png"
+            heatmap_path = output_dir / f"heatmap_event_{timestamp}.png"
             generator.generate_from_events(
                 events=events,
                 output_path=heatmap_path,
                 blur_radius=20
             )
 
-            comparison_path = output_dir / f"comparison_complete_{timestamp}.png"
+            comparison_path = output_dir / f"comparison_event_{timestamp}.png"
             generator.generate_comparison(
                 events=events,
                 output_path=comparison_path
@@ -410,7 +330,7 @@ class CompleteDemo:
             print(f"✓ Heatmap general: {heatmap_path.name}")
             print(f"✓ Comparación: {comparison_path.name}")
 
-            # 2. Generar overlays sobre screenshots
+            # 2. Generar overlays sobre screenshots (NUEVO)
             if screenshot_count > 0:
                 print()
                 overlay_generator = HeatmapOverlayGenerator(
@@ -418,14 +338,14 @@ class CompleteDemo:
                     screen_height=self.screen_height
                 )
 
-                overlay_dir = output_dir / f"overlays_complete_{timestamp}"
+                overlay_dir = output_dir / f"overlays_{timestamp}"
 
                 # Generar todos los overlays
                 overlay_paths = overlay_generator.generate_all_overlays(
                     screenshots=screenshots,
                     all_events=events,
                     output_dir=overlay_dir,
-                    time_window=5.0,
+                    time_window=5.0,  # 5 segundos antes de cada screenshot
                     blur_radius=25,
                     alpha=0.6,
                     show_clicks=True,
@@ -434,7 +354,7 @@ class CompleteDemo:
 
                 # Crear grilla de comparación
                 if overlay_paths:
-                    grid_path = output_dir / f"overlay_grid_complete_{timestamp}.png"
+                    grid_path = output_dir / f"overlay_grid_{timestamp}.png"
                     overlay_generator.create_comparison_grid(
                         screenshots=screenshots,
                         overlay_paths=overlay_paths,
@@ -446,46 +366,40 @@ class CompleteDemo:
                     print(f"✓ Grilla de comparación: {grid_path.name}")
 
             print()
-            print("=" * 75)
-            print("📊 RESUMEN DE VISUALIZACIONES")
-            print("=" * 75)
-            print(f"\n1. Heatmaps Generales:")
+            print("=" * 70)
+            print("📊 RESUMEN DE VISUALIZACIONES GENERADAS")
+            print("=" * 70)
+            print(f"\n1. Heatmap General:")
             print(f"   - {heatmap_path}")
             print(f"   - {comparison_path}")
 
             if screenshot_count > 0:
                 print(f"\n2. Heatmap Overlays ({len(overlay_paths)} screenshots):")
                 print(f"   - Carpeta: {overlay_dir}/")
-                print(f"   - Grilla: {grid_path}")
-                print(f"\n💡 Los overlays muestran contexto visual + actividad del usuario")
+                print(f"   - Grilla comparativa: {grid_path}")
+                print(f"\n💡 Los overlays muestran el contexto visual + heatmap de actividad")
 
-        # === RESUMEN FINAL ===
         print()
-        print("=" * 75)
-        print("✅ SESIÓN COMPLETADA EXITOSAMENTE")
-        print("=" * 75)
+        print("=" * 70)
+        print("✅ Demo completada exitosamente!")
+        print("=" * 70)
         print()
         print("📂 Archivos generados:")
-        print(f"  - Base de datos: data/hci_logger.db (con metadata completa)")
-        print(f"  - Screenshots: data/sessions/{self.session_uuid}/screenshots/")
-        print(f"  - Audio: data/sessions/{self.session_uuid}/audio/")
+        print(f"  - Base de datos: data/hci_logger.db")
+        print(f"  - Screenshots: data/screenshots/{self.session_uuid}/")
         print(f"  - Heatmaps: output/")
         if screenshot_count > 0:
-            print(f"  - Overlays: output/overlays_complete_*/")
+            print(f"  - Overlays: output/overlays_*/")
         print()
-        print("💡 Próximos pasos:")
-        print("  - Reproducir audio para escuchar comentarios del usuario")
-        print("  - Analizar overlays para identificar pain points")
-        print("  - Correlacionar audio con screenshots para contexto completo")
-        print()
+
+        # Cerrar base de datos
+        self.db.close()
 
 
 def main():
     """Punto de entrada"""
-    # Parámetros desde argumentos
+    # Duración desde argumentos o default 60 segundos
     duration = 60
-    audio_segment_duration = 30
-
     if len(sys.argv) > 1:
         try:
             duration = int(sys.argv[1])
@@ -493,18 +407,8 @@ def main():
             print(f"⚠️  Duración inválida: {sys.argv[1]}")
             print("   Usando duración por defecto: 60 segundos")
 
-    if len(sys.argv) > 2:
-        try:
-            audio_segment_duration = int(sys.argv[2])
-        except ValueError:
-            print(f"⚠️  Duración de segmento de audio inválida: {sys.argv[2]}")
-            print("   Usando duración por defecto: 30 segundos")
-
     # Ejecutar demo
-    demo = CompleteDemo(
-        duration=duration,
-        audio_segment_duration=audio_segment_duration
-    )
+    demo = EventScreenshotDemo(duration=duration)
     demo.start()
 
 

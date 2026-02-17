@@ -142,6 +142,9 @@ class EmotionTracker:
 
             except Exception as e:
                 logger.error(f"Error en capture loop: {e}")
+                # Mostrar error cada 5 veces para no saturar logs
+                if self.emotions_captured % 5 == 0:
+                    print(f"  ⚠️  Error en emotion detection: {e}")
                 time.sleep(1.0)  # Backoff en caso de error
 
     def _analyze_frame(self, frame) -> Optional[Dict[str, Any]]:
@@ -174,17 +177,28 @@ class EmotionTracker:
             if not emotions:
                 return None
 
-            # Normalizar valores a 0-1
+            # Normalizar valores a 0-1 y asegurar que estén en el rango válido
+            def normalize_emotion(value):
+                """Normaliza y clampea valor de emoción a rango [0, 1]"""
+                try:
+                    if value is None:
+                        return 0.0
+                    normalized = float(value) / 100.0
+                    # Clampear al rango [0, 1] para cumplir con CHECK constraint
+                    return max(0.0, min(1.0, normalized))
+                except (ValueError, TypeError):
+                    return 0.0
+
             emotion_data = {
                 'session_id': self.session_id,
                 'timestamp': timestamp,
-                'angry': emotions.get('angry', 0) / 100.0,
-                'disgust': emotions.get('disgust', 0) / 100.0,
-                'fear': emotions.get('fear', 0) / 100.0,
-                'happy': emotions.get('happy', 0) / 100.0,
-                'sad': emotions.get('sad', 0) / 100.0,
-                'surprise': emotions.get('surprise', 0) / 100.0,
-                'neutral': emotions.get('neutral', 0) / 100.0,
+                'angry': normalize_emotion(emotions.get('angry', 0)),
+                'disgust': normalize_emotion(emotions.get('disgust', 0)),
+                'fear': normalize_emotion(emotions.get('fear', 0)),
+                'happy': normalize_emotion(emotions.get('happy', 0)),
+                'sad': normalize_emotion(emotions.get('sad', 0)),
+                'surprise': normalize_emotion(emotions.get('surprise', 0)),
+                'neutral': normalize_emotion(emotions.get('neutral', 0)),
                 'dominant_emotion': result.get('dominant_emotion', 'unknown')
             }
 
@@ -203,6 +217,8 @@ class EmotionTracker:
 
         except Exception as e:
             logger.error(f"Error analizando frame: {e}")
+            # Solo loggear en debug, no mostrar en consola para no saturar
+            logger.debug(f"  Frame analysis error details: {type(e).__name__}: {e}")
             return None
 
     def stop(self, timeout: float = 5.0):

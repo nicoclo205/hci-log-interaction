@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Demo de tracking de mouse con generación de heatmap
 
@@ -15,6 +16,13 @@ import uuid
 import signal
 from pathlib import Path
 from datetime import datetime
+import mss
+
+# Fix para encoding en Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Añadir el directorio raíz al path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -22,6 +30,33 @@ sys.path.insert(0, str(Path(__file__).parent))
 from hci_logger.storage.database import Database
 from hci_logger.trackers.mouse_tracker import MouseTracker
 from hci_logger.processing.heatmap import HeatmapGenerator
+
+
+def get_screen_dimensions():
+    """
+    Detecta las dimensiones completas del espacio de trabajo (todos los monitores)
+
+    Returns:
+        tuple: (width, height, min_x, min_y, max_x, max_y)
+    """
+    with mss.mss() as sct:
+        # Monitor 0 = todos los monitores combinados
+        monitor = sct.monitors[0]
+
+        width = monitor['width']
+        height = monitor['height']
+        left = monitor['left']
+        top = monitor['top']
+
+        print(f"📐 Dimensiones detectadas del espacio de trabajo:")
+        print(f"   Resolución completa: {width}x{height}")
+        print(f"   Origen: ({left}, {top})")
+        print(f"   Monitores individuales:")
+
+        for i, m in enumerate(sct.monitors[1:], 1):
+            print(f"     Monitor {i}: {m['width']}x{m['height']} en ({m['left']}, {m['top']})")
+
+        return width, height, left, top
 
 
 class SimpleTrackingDemo:
@@ -34,6 +69,8 @@ class SimpleTrackingDemo:
         self.session_uuid = None
         self.tracker = None
         self.running = False
+        self.screen_width = None
+        self.screen_height = None
 
         # Buffer de eventos (para batch insert)
         self.event_buffer = []
@@ -80,6 +117,12 @@ class SimpleTrackingDemo:
         print("=" * 60)
         print()
 
+        # Detectar dimensiones de pantalla
+        screen_width, screen_height, _, _ = get_screen_dimensions()
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        print()
+
         # Inicializar base de datos
         print("📊 Inicializando base de datos...")
         self.db.initialize()
@@ -91,8 +134,8 @@ class SimpleTrackingDemo:
             participant_id="demo_user",
             experiment_id="prototype_test",
             target_url="facebook.com",
-            screen_width=1920,
-            screen_height=1080
+            screen_width=screen_width,
+            screen_height=screen_height
         )
 
         print(f"✓ Sesión creada: {self.session_uuid}")
@@ -182,7 +225,11 @@ class SimpleTrackingDemo:
             output_dir = Path("output")
             output_dir.mkdir(exist_ok=True)
 
-            generator = HeatmapGenerator(screen_width=1920, screen_height=1080)
+            # Usar dimensiones detectadas para el heatmap
+            generator = HeatmapGenerator(
+                screen_width=self.screen_width,
+                screen_height=self.screen_height
+            )
 
             # Heatmap general
             heatmap_path = output_dir / f"heatmap_{timestamp}.png"

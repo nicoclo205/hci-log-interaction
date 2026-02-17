@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Mouse tracker usando pynput"""
 
 import time
@@ -97,3 +98,17 @@ class MouseTracker:
         }
         self.on_event_callback(event)
         self.events_captured += 1
+
+
+if __name__ == "__main__":
+    def print_event(event):
+        print(f"Evento capturado: {event}")
+
+    tracker = MouseTracker(session_id=1, on_event_callback=print_event)
+    tracker.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        tracker.stop()

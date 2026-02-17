@@ -51,11 +51,17 @@ CREATE TABLE IF NOT EXISTS screenshots (
     width INTEGER,
     height INTEGER,
     format TEXT,
+    -- Metadata del evento que triggereó el screenshot
+    trigger_event_type TEXT,  -- 'click', 'scroll', 'periodic', null
+    trigger_x INTEGER,        -- Coordenada X del evento trigger
+    trigger_y INTEGER,        -- Coordenada Y del evento trigger
+    trigger_metadata TEXT,    -- JSON con metadata adicional del evento
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_screenshot_session ON screenshots(session_id);
 CREATE INDEX IF NOT EXISTS idx_screenshot_timestamp ON screenshots(timestamp);
+CREATE INDEX IF NOT EXISTS idx_screenshot_trigger_type ON screenshots(trigger_event_type);
 
 -- Audio segments table
 CREATE TABLE IF NOT EXISTS audio_segments (

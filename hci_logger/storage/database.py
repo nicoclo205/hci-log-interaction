@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Database manager for HCI Logger"""
 
 import sqlite3
@@ -19,7 +20,9 @@ class Database:
 
     def connect(self):
         """Connect to database"""
-        self.conn = sqlite3.connect(str(self.db_path))
+        # check_same_thread=False permite usar la conexión desde múltiples threads
+        # Esto es seguro porque ya usamos WAL mode que soporta concurrencia
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Access columns by name
 
         # Enable WAL mode for better concurrency
@@ -149,16 +152,22 @@ class Database:
         file_size: int,
         width: int,
         height: int,
-        format: str = 'png'
+        format: str = 'png',
+        trigger_event_type: str = None,
+        trigger_x: int = None,
+        trigger_y: int = None,
+        trigger_metadata: str = None
     ):
         """Insert a screenshot record"""
         self.conn.execute(
             """
             INSERT INTO screenshots
-            (session_id, timestamp, file_path, file_size, width, height, format)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (session_id, timestamp, file_path, file_size, width, height, format,
+             trigger_event_type, trigger_x, trigger_y, trigger_metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, timestamp, file_path, file_size, width, height, format)
+            (session_id, timestamp, file_path, file_size, width, height, format,
+             trigger_event_type, trigger_x, trigger_y, trigger_metadata)
         )
         self.conn.commit()
 
