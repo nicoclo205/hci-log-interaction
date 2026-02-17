@@ -28,42 +28,48 @@
 
 ---
 
-## 🎯 Demos Actualizados
+## 🎯 Demos Actualizados (Orden de Complejidad)
 
-### **1. demo_tracking.py** ✅
+### **1. 1-demo_tracking.py** ✅
 - Mouse tracking básico
 - Generación de heatmaps
 - **Actualizado:** Dimensiones auto-detectadas, encoding UTF-8
+- **Ideal para:** Aprender el sistema básico
 
-### **2. demo_event_screenshots.py** ✅ NUEVO
+### **2. 2-demo_with_screenshots.py** ✅
+- Mouse tracking
+- Screenshots periódicos (cada N segundos)
+- **Ideal para:** Entender captura de pantalla básica
+
+### **3. 3-demo_event_screenshots.py** ✅ NUEVO
+- Mouse tracking
+- Screenshots inteligentes basados en EVENTOS (clicks/scrolls)
+- Heatmap overlays sobre screenshots
+- **Sistema completo Fase 1 + 2**
+- **Ideal para:** Ver screenshots contextuales con actividad
+
+### **4. 4-demo_complete.py** ✅ ACTUALIZADO
 - Mouse tracking
 - Screenshots inteligentes (eventos)
-- Heatmap overlays
-- Sistema completo Fase 1 + 2
-
-### **3. demo_with_screenshots.py** ✅
-- Mouse tracking
-- Screenshots inteligentes
-- **Actualizado:** EventBasedScreenshotTracker
-
-### **4. demo_complete.py** ✅ ACTUALIZADO HOY
-- Mouse tracking
-- Screenshots inteligentes
-- Audio recording
+- Audio recording (Think-Aloud Protocol)
 - Heatmap overlays
 - **Sistema profesional de UX research**
+- **Ideal para:** Estudios completos sin video facial
 
-### **5. demo_full.py** ✅ ACTUALIZADO HOY
+### **5. 5-demo_full.py** ✅ ACTUALIZADO
 - Mouse tracking
-- Screenshots inteligentes
+- Screenshots inteligentes (eventos)
 - Audio recording
-- **Emotion detection** 😊
+- **Emotion detection** 😊 (7 emociones + edad + género)
 - Heatmap overlays
 - **Sistema completo multimodal**
+- **Ideal para:** Análisis afectivo + usabilidad
 
-### **6. demo_ultimate.py** ⏳ Pendiente
-- Todos los trackers + Eye tracking
-- Próximo a actualizar
+### **6. 6-demo_ultimate.py** ✅
+- Todos los trackers anteriores
+- **+ Eye tracking** 👁️ con calibración
+- **Sistema completo con 5 trackers simultáneos**
+- **Ideal para:** Investigación avanzada HCI
 
 ---
 
@@ -153,14 +159,20 @@ Timestamp: 1:23.5
 ### **Para Investigación UX:**
 
 ```bash
-# Test completo (2 min con emociones)
-python demo_full.py 120
+# Demo 1: Básico (30s - solo mouse)
+python 1-demo_tracking.py
 
-# Test rápido (30s sin emociones)
-python demo_complete.py 30
+# Demo 3: Screenshots inteligentes (60s)
+python 3-demo_event_screenshots.py 60
 
-# Solo screenshots inteligentes
-python demo_event_screenshots.py 60
+# Demo 4: UX Research completo (sin emociones, 120s)
+python 4-demo_complete.py 120
+
+# Demo 5: Con análisis emocional (120s)
+python 5-demo_full.py 120
+
+# Demo 6: Sistema COMPLETO con eye tracking (180s)
+python 6-demo_ultimate.py 180
 ```
 
 ### **Análisis Post-Test:**
@@ -247,11 +259,12 @@ Este sistema es equivalente a herramientas comerciales como:
 
 1. ✅ **Screenshots Inteligentes** - Fase 1 implementada
 2. ✅ **Heatmap Overlays** - Fase 2 implementada
-3. ✅ **demo_complete.py** - Actualizado v2.0
-4. ✅ **demo_full.py** - Actualizado v2.0 con emociones
+3. ✅ **4-demo_complete.py** - Actualizado v2.0
+4. ✅ **5-demo_full.py** - Actualizado v2.0 con emociones
 5. ✅ **Fixes globales** - Threading, encoding, dimensiones
 6. ✅ **Database v2.0** - Schema con metadata de triggers
 7. ✅ **Documentación completa** - Guías y referencias
+8. ✅ **Demos numerados** - Orden visual de ejecución (1-6)
 
 ---
 

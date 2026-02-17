@@ -34,7 +34,12 @@ hci-log-interaction/
 │   │   └── schema.sql
 │   └── processing/         # Procesamiento de datos
 │       └── heatmap.py
-├── demo_tracking.py        # Script de prueba
+├── 1-demo_tracking.py        # Demo 1: Mouse tracking básico
+├── 2-demo_with_screenshots.py  # Demo 2: Mouse + Screenshots
+├── 3-demo_event_screenshots.py # Demo 3: Screenshots inteligentes
+├── 4-demo_complete.py          # Demo 4: Mouse + Screenshots + Audio
+├── 5-demo_full.py              # Demo 5: + Emotion Detection
+├── 6-demo_ultimate.py          # Demo 6: ¡Todos los trackers!
 ├── requirements.txt        # Dependencias
 └── README.md              # Este archivo
 ```
@@ -62,64 +67,95 @@ pip install -r requirements.txt
 
 ## 💻 Uso
 
-### Demo Básico: Solo Mouse Tracking
+### Demo 1: Mouse Tracking Básico
 ```bash
-python demo_tracking.py [duración]
+python 1-demo_tracking.py [duración]
 
 # Ejemplos:
-python demo_tracking.py     # 30 segundos (default)
-python demo_tracking.py 60  # 60 segundos
-```
-
-### Demo Completo: Mouse + Screenshots 🆕
-```bash
-python demo_with_screenshots.py [duración] [intervalo_screenshots]
-
-# Ejemplos:
-python demo_with_screenshots.py           # 30s, screenshot cada 5s
-python demo_with_screenshots.py 60 3      # 60s, screenshot cada 3s
-python demo_with_screenshots.py 120 10    # 2min, screenshot cada 10s
-```
-
-### Demo Full: Mouse + Screenshots + Audio 🔥
-```bash
-python demo_complete.py [duración] [screenshot_interval] [audio_segment_duration]
-
-# Ejemplos:
-python demo_complete.py                   # 60s, screenshot cada 5s, audio cada 30s
-python demo_complete.py 120 5 60          # 2min, screenshot cada 5s, audio cada 60s
-python demo_complete.py 300 10 120        # 5min, screenshot cada 10s, audio cada 2min
-```
-
-### Demo DEFINITIVO: Mouse + Screenshots + Audio + Emotions 🚀😊
-```bash
-python demo_full.py [duración]
-
-# Ejemplos:
-python demo_full.py          # 2 minutos con 4 trackers
-python demo_full.py 300      # 5 minutos de tracking completo
+python 1-demo_tracking.py     # 30 segundos (default)
+python 1-demo_tracking.py 60  # 60 segundos
 
 # Incluye:
 # 🖱️  Mouse tracking
-# 📸 Screenshots cada 10s
-# 🎤 Audio en segmentos de 60s
-# 😊 Emotion detection cada 0.5s (7 emociones + edad + género)
+# 🎨 Heatmap generation
 ```
 
-### Demo ULTIMATE: ¡LOS 5 TRACKERS! 🎯👁️🚀
+### Demo 2: Mouse + Screenshots Periódicos
 ```bash
-python demo_ultimate.py [duración]
+python 2-demo_with_screenshots.py [duración] [intervalo_screenshots]
 
 # Ejemplos:
-python demo_ultimate.py          # 3 minutos - SISTEMA COMPLETO
-python demo_ultimate.py 300      # 5 minutos
+python 2-demo_with_screenshots.py           # 30s, screenshot cada 5s
+python 2-demo_with_screenshots.py 60 3      # 60s, screenshot cada 3s
+python 2-demo_with_screenshots.py 120 10    # 2min, screenshot cada 10s
+
+# Incluye:
+# 🖱️  Mouse tracking
+# 📸 Screenshots periódicos
+```
+
+### Demo 3: Screenshots Inteligentes (Eventos) 🆕
+```bash
+python 3-demo_event_screenshots.py [duración]
+
+# Ejemplos:
+python 3-demo_event_screenshots.py        # 60s con screenshots inteligentes
+python 3-demo_event_screenshots.py 120    # 2min
+
+# Incluye:
+# 🖱️  Mouse tracking
+# 📸 Screenshots basados en EVENTOS (clicks/scrolls)
+# 🔥 Heatmap overlays sobre screenshots
+```
+
+### Demo 4: Sistema Completo con Audio 🔥
+```bash
+python 4-demo_complete.py [duración]
+
+# Ejemplos:
+python 4-demo_complete.py        # 60s completo
+python 4-demo_complete.py 120    # 2min
+
+# Incluye:
+# 🖱️  Mouse tracking
+# 📸 Screenshots inteligentes (eventos)
+# 🎤 Audio recording (Think-Aloud Protocol)
+# 🔥 Heatmap overlays
+```
+
+### Demo 5: + Emotion Detection 🚀😊
+```bash
+python 5-demo_full.py [duración]
+
+# Ejemplos:
+python 5-demo_full.py          # 2 minutos con 4 trackers
+python 5-demo_full.py 120      # 2 minutos
+python 5-demo_full.py 300      # 5 minutos
+
+# Incluye:
+# 🖱️  Mouse tracking
+# 📸 Screenshots inteligentes (eventos)
+# 🎤 Audio recording
+# 😊 Emotion detection @ 2 Hz (7 emociones + edad + género)
+# 🔥 Heatmap overlays
+```
+
+### Demo 6: ¡TODOS LOS TRACKERS! 🎯👁️🚀
+```bash
+python 6-demo_ultimate.py [duración]
+
+# Ejemplos:
+python 6-demo_ultimate.py          # 3 minutos - SISTEMA COMPLETO
+python 6-demo_ultimate.py 180      # 3 minutos
+python 6-demo_ultimate.py 300      # 5 minutos
 
 # Incluye TODO:
 # 🖱️  Mouse tracking
-# 📸 Screenshots cada 10s
-# 🎤 Audio en segmentos de 60s
+# 📸 Screenshots inteligentes (eventos)
+# 🎤 Audio recording
 # 😊 Emotion detection @ 2 Hz (7 emociones)
 # 👁️  Eye tracking @ 30 Hz con calibración opcional
+# 🔥 Heatmap overlays completos
 ```
 
 **Notas Importantes**:
@@ -281,7 +317,7 @@ generator.generate_from_events(events, output_path)
 
 ### Ajustar threshold de movimiento
 
-En `demo_tracking.py`:
+En `1-demo_tracking.py` (o cualquier demo):
 ```python
 self.tracker = MouseTracker(
     session_id=self.session_id,
