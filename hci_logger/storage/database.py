@@ -32,7 +32,7 @@ class Database:
         return self.conn
 
     def initialize(self):
-        """Initialize database with schema"""
+        """Initialize database with schema and run migrations"""
         if self.conn is None:
             self.connect()
 
@@ -43,6 +43,20 @@ class Database:
 
         self.conn.executescript(schema)
         self.conn.commit()
+
+        # Migrations: add task_id to existing tables if missing
+        migrations = [
+            "ALTER TABLE mouse_events ADD COLUMN task_id INTEGER DEFAULT 0",
+            "ALTER TABLE screenshots ADD COLUMN task_id INTEGER DEFAULT 0",
+            "ALTER TABLE emotion_events ADD COLUMN task_id INTEGER DEFAULT 0",
+            "ALTER TABLE audio_segments ADD COLUMN task_id INTEGER DEFAULT 0",
+        ]
+        for sql in migrations:
+            try:
+                self.conn.execute(sql)
+                self.conn.commit()
+            except Exception:
+                pass  # Column already exists
 
         print(f"✓ Database initialized at {self.db_path}")
 
@@ -104,15 +118,31 @@ class Database:
         )
 
     def insert_mouse_events_batch(self, events: list):
-        """Insert multiple mouse events in batch"""
-        self.conn.executemany(
-            """
-            INSERT INTO mouse_events
-            (session_id, timestamp, event_type, x, y, button, pressed, scroll_dx, scroll_dy)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            events
-        )
+        """Insert multiple mouse events in batch.
+
+        Accepts tuples of 9 elements (legacy) or 10 elements (with task_id).
+        """
+        if not events:
+            return
+        if len(events[0]) == 10:
+            self.conn.executemany(
+                """
+                INSERT INTO mouse_events
+                (session_id, timestamp, event_type, x, y, button, pressed,
+                 scroll_dx, scroll_dy, task_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                events
+            )
+        else:
+            self.conn.executemany(
+                """
+                INSERT INTO mouse_events
+                (session_id, timestamp, event_type, x, y, button, pressed, scroll_dx, scroll_dy)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                events
+            )
         self.conn.commit()
 
     def get_session(self, session_id: int) -> Optional[Dict[str, Any]]:
@@ -156,18 +186,19 @@ class Database:
         trigger_event_type: str = None,
         trigger_x: int = None,
         trigger_y: int = None,
-        trigger_metadata: str = None
+        trigger_metadata: str = None,
+        task_id: int = 0
     ):
         """Insert a screenshot record"""
         self.conn.execute(
             """
             INSERT INTO screenshots
             (session_id, timestamp, file_path, file_size, width, height, format,
-             trigger_event_type, trigger_x, trigger_y, trigger_metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             trigger_event_type, trigger_x, trigger_y, trigger_metadata, task_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (session_id, timestamp, file_path, file_size, width, height, format,
-             trigger_event_type, trigger_x, trigger_y, trigger_metadata)
+             trigger_event_type, trigger_x, trigger_y, trigger_metadata, task_id)
         )
         self.conn.commit()
 
@@ -200,18 +231,19 @@ class Database:
         file_path: str,
         sample_rate: int,
         channels: int,
-        file_size: int
+        file_size: int,
+        task_id: int = 0
     ):
         """Insert an audio segment record"""
         self.conn.execute(
             """
             INSERT INTO audio_segments
             (session_id, start_timestamp, end_timestamp, duration,
-             file_path, sample_rate, channels, file_size)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             file_path, sample_rate, channels, file_size, task_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (session_id, start_timestamp, end_timestamp, duration,
-             file_path, sample_rate, channels, file_size)
+             file_path, sample_rate, channels, file_size, task_id)
         )
         self.conn.commit()
 
@@ -258,18 +290,19 @@ class Database:
         dominant_emotion: str,
         face_confidence: float = None,
         age: int = None,
-        gender: str = None
+        gender: str = None,
+        task_id: int = 0
     ):
         """Insert an emotion detection event"""
         self.conn.execute(
             """
             INSERT INTO emotion_events
             (session_id, timestamp, angry, disgust, fear, happy, sad, surprise, neutral,
-             dominant_emotion, face_confidence, age, gender)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             dominant_emotion, face_confidence, age, gender, task_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (session_id, timestamp, angry, disgust, fear, happy, sad, surprise, neutral,
-             dominant_emotion, face_confidence, age, gender)
+             dominant_emotion, face_confidence, age, gender, task_id)
         )
         self.conn.commit()
 
@@ -359,6 +392,36 @@ class Database:
             (session_id,)
         )
         return cursor.fetchone()['count']
+
+    def insert_transcription(
+        self,
+        session_id: int,
+        task_id: int,
+        timestamp: float,
+        text: str,
+        audio_file: str = None
+    ):
+        """Insert a Whisper transcription result"""
+        self.conn.execute(
+            """
+            INSERT INTO transcriptions (session_id, task_id, timestamp, text, audio_file)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (session_id, task_id, timestamp, text, audio_file)
+        )
+        self.conn.commit()
+
+    def get_transcriptions(self, session_id: int) -> list:
+        """Get all transcriptions for a session"""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM transcriptions
+            WHERE session_id = ?
+            ORDER BY timestamp
+            """,
+            (session_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
     def close(self):
         """Close database connection"""

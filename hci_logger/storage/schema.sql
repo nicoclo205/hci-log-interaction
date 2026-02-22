@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS mouse_events (
     pressed BOOLEAN,
     scroll_dx REAL,
     scroll_dy REAL,
+    task_id INTEGER DEFAULT 0,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS screenshots (
     trigger_x INTEGER,        -- Coordenada X del evento trigger
     trigger_y INTEGER,        -- Coordenada Y del evento trigger
     trigger_metadata TEXT,    -- JSON con metadata adicional del evento
+    task_id INTEGER DEFAULT 0,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
@@ -74,6 +76,7 @@ CREATE TABLE IF NOT EXISTS audio_segments (
     sample_rate INTEGER,
     channels INTEGER,
     file_size INTEGER,
+    task_id INTEGER DEFAULT 0,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
@@ -96,6 +99,7 @@ CREATE TABLE IF NOT EXISTS emotion_events (
     face_confidence REAL,
     age INTEGER,
     gender TEXT,
+    task_id INTEGER DEFAULT 0,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
@@ -126,6 +130,20 @@ CREATE TABLE IF NOT EXISTS eye_events (
 CREATE INDEX IF NOT EXISTS idx_eye_session ON eye_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_eye_timestamp ON eye_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_eye_calibrated ON eye_events(is_calibrated);
+
+-- Transcriptions (Whisper output)
+CREATE TABLE IF NOT EXISTS transcriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    task_id INTEGER DEFAULT 0,
+    timestamp REAL NOT NULL,
+    text TEXT NOT NULL,
+    audio_file TEXT,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_transcription_session ON transcriptions(session_id);
+CREATE INDEX IF NOT EXISTS idx_transcription_task ON transcriptions(task_id);
 
 -- Database metadata
 CREATE TABLE IF NOT EXISTS db_metadata (

@@ -197,15 +197,14 @@ class AudioTracker:
 
     def stop(self):
         """Detener captura de audio"""
-        self.running = False
-
-        # Detener stream
+        # 1. Parar el stream primero para que no lleguen más callbacks
         if self.stream:
             self.stream.stop()
             self.stream.close()
             self.stream = None
 
-        # Guardar segmento final si hay datos
+        # 2. Encolar segmento final ANTES de señalar parada,
+        #    así el writer_loop no puede salir antes de procesarlo
         if self.current_segment:
             segment_data = np.concatenate(self.current_segment, axis=0)
             self.audio_buffer.put({
@@ -214,9 +213,12 @@ class AudioTracker:
                 'end_time': time.time()
             })
 
-        # Esperar a que termine el writer thread
+        # 3. Ahora señalar parada (el writer_loop ve la cola no vacía y termina limpio)
+        self.running = False
+
+        # 4. Esperar al writer thread con tiempo suficiente para procesar
         if self._writer_thread:
-            self._writer_thread.join(timeout=5.0)
+            self._writer_thread.join(timeout=10.0)
 
         print(f"✓ Audio tracker stopped ({self.segments_captured} segments captured)")
 
