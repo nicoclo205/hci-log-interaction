@@ -19,7 +19,24 @@ Uso:
     python main.py   (desde el entorno hci-env)
 """
 
+import os
 import sys
+
+# ── Desactivar accesibilidad de Qt ANTES de importar PySide6 ──────────────────
+# Esto elimina el botón nativo "Cerrar" que Qt genera sobre los modales web.
+os.environ["QT_ACCESSIBILITY"] = "0"
+os.environ["QT_LINUX_ACCESSIBILITY_ALWAYS_ON"] = "0"
+
+# Deshabilitar infobars y notificaciones del motor Chromium embebido
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+    "--disable-notifications "
+    "--disable-infobars "
+    "--disable-save-password-bubble "
+    "--disable-translate "
+    "--disable-features=Accessibility,TranslateUI,PasswordManagerOnboarding "
+    "--force-renderer-accessibility=false"
+)
+
 import uuid
 import threading
 from pathlib import Path
@@ -32,6 +49,9 @@ from PySide6.QtWidgets import (
     QGridLayout, QSlider, QFileDialog, QMessageBox,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineScript,
+)
 from PySide6.QtCore import QUrl, Qt, Signal, QObject
 from PySide6.QtGui import QFont, QPixmap
 
@@ -58,6 +78,42 @@ EMOTION_EMOJIS = {
 
 
 # ── Señales Qt ────────────────────────────────────────────────────────────────
+
+class SilentWebPage(QWebEnginePage):
+    """Página personalizada que suprime TODOS los diálogos/popups nativos de Qt
+    para evitar el botón 'Cerrar' que interfiere con el tracking de clicks."""
+
+    def __init__(self, profile, parent=None):
+        super().__init__(profile, parent)
+        # Denegar automáticamente todas las solicitudes de permisos (notificaciones, etc.)
+        self.featurePermissionRequested.connect(self._deny_permission)
+        # Desactivar notificaciones push
+        try:
+            self.setNotificationPresenter(lambda notification: notification.close())
+        except Exception:
+            pass
+
+    def _deny_permission(self, origin, feature):
+        """Denegar todas las solicitudes de permisos (notificaciones, geoloc, cámara, etc.)"""
+        self.setFeaturePermission(origin, feature, QWebEnginePage.PermissionDeniedByUser)
+
+    def javaScriptAlert(self, securityOrigin, msg):
+        pass  # Suprimir alertas JS
+
+    def javaScriptConfirm(self, securityOrigin, msg):
+        return True  # Aceptar automáticamente
+
+    def javaScriptPrompt(self, securityOrigin, msg, defaultValue):
+        return (True, defaultValue)  # Devolver valor por defecto
+
+    def certificateError(self, error):
+        error.acceptCertificate()
+        return True
+
+    def createWindow(self, window_type):
+        return None  # Bloquear popups / ventanas nuevas
+
+
 class UISignals(QObject):
     click_count_updated      = Signal(int)
     screenshot_count_updated = Signal(int)
@@ -701,6 +757,50 @@ class HCILoggerWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
 
         self.browser = QWebEngineView()
+
+        # Usar página personalizada que suprime diálogos JS y permisos
+        profile = QWebEngineProfile.defaultProfile()
+        profile.setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
+
+        # Inyectar JS al inicio que deshabilita la Notification API
+        # (Facebook no podrá pedir permisos de notificaciones → sin popup "Cerrar")
+        kill_notifications_js = QWebEngineScript()
+        kill_notifications_js.setName("KillNotifications")
+        kill_notifications_js.setSourceCode("""
+            // Deshabilitar Notification API para evitar solicitud de permisos
+            Object.defineProperty(window, 'Notification', {
+                value: function() {},
+                writable: false,
+                configurable: false,
+            });
+            window.Notification.permission = 'denied';
+            window.Notification.requestPermission = function() {
+                return Promise.resolve('denied');
+            };
+
+            // Deshabilitar Service Workers (push notifications)
+            if (navigator.serviceWorker) {
+                Object.defineProperty(navigator, 'serviceWorker', {
+                    value: { register: function() { return Promise.reject(); } },
+                    writable: false,
+                });
+            }
+        """)
+        kill_notifications_js.setInjectionPoint(QWebEngineScript.DocumentCreation)
+        kill_notifications_js.setWorldId(QWebEngineScript.MainWorld)
+        kill_notifications_js.setRunsOnSubFrames(True)
+        profile.scripts().insert(kill_notifications_js)
+
+        silent_page = SilentWebPage(profile, self.browser)
+        self.browser.setPage(silent_page)
+
+        # Deshabilitar ventanas emergentes y notificaciones
+        settings = self.browser.settings()
+        settings.setAttribute(QWebEngineSettings.JavascriptCanOpenWindows, False)
+
+        # Inyectar JS adicional después de cargar para cerrar modales de Facebook
+        self.browser.loadFinished.connect(self._inject_modal_killer)
+
         self.browser.load(QUrl(TARGET_URL))
         self.browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root.addWidget(self.browser, stretch=1)
@@ -1078,6 +1178,108 @@ class HCILoggerWindow(QMainWindow):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
+    def _inject_modal_killer(self, ok: bool):
+        """Inyecta JS que cierra automáticamente modales/diálogos de Facebook
+        (ej: 'Recordar contraseña') y oculta widgets nativos de Qt."""
+        if not ok:
+            return
+
+        # ── 1. Ocultar widgets hijos nativos que Qt pone sobre el browser ────
+        self._hide_native_overlays()
+
+        js = """
+        (function() {
+            // Cerrar modales de Facebook
+            function killModals() {
+                // Buscar botones "Ahora no" / "Not Now"
+                var buttons = document.querySelectorAll('[role="button"], button, a, span');
+                for (var i = 0; i < buttons.length; i++) {
+                    var text = (buttons[i].textContent || '').trim();
+                    if (text === 'Ahora no' || text === 'Not Now' || text === 'Not now' ||
+                        text === 'Dismiss' || text === 'Descartar') {
+                        buttons[i].click();
+                        return;
+                    }
+                }
+                // Cerrar diálogos via aria-label
+                var closers = document.querySelectorAll(
+                    '[aria-label="Cerrar"], [aria-label="Close"], [aria-label="Dismiss"]'
+                );
+                for (var j = 0; j < closers.length; j++) {
+                    // Solo si el diálogo está visible
+                    var parent = closers[j].closest('[role="dialog"]');
+                    if (parent) {
+                        closers[j].click();
+                        return;
+                    }
+                }
+                // Remover overlays/backdrops que oscurecen la página
+                var overlays = document.querySelectorAll(
+                    '[data-testid="dialog_overlay"], .__fb-dark-mode-compatible-background-overlay'
+                );
+                overlays.forEach(function(el) { el.remove(); });
+            }
+            // Ejecutar cada 1.5 segundos durante 60 segundos
+            var count = 0;
+            var iv = setInterval(function() {
+                killModals();
+                count++;
+                if (count > 40) clearInterval(iv);
+            }, 1500);
+            killModals();
+        })();
+        """
+        self.browser.page().runJavaScript(js)
+
+    def _hide_native_overlays(self):
+        """Inicia un timer periódico que busca y oculta widgets nativos de Qt
+        que aparecen sobre el browser (como el botón 'Cerrar')."""
+        from PySide6.QtCore import QTimer
+        self._overlay_timer = QTimer(self)
+        self._overlay_timer.timeout.connect(self._scan_and_hide_overlays)
+        self._overlay_timer.start(500)  # Cada 500ms
+
+    def _scan_and_hide_overlays(self):
+        """Busca recursivamente en TODA la jerarquía del browser y elimina
+        cualquier widget nativo de overlay (botones, labels, frames)."""
+        from PySide6.QtWidgets import QWidget as QW, QPushButton as QPB
+        try:
+            for child in self.browser.findChildren(QW):
+                class_name = child.metaObject().className()
+
+                # Preservar widgets esenciales del render
+                if any(x in class_name for x in [
+                    "RenderWidget", "WebEngineView", "QWebEngine",
+                    "FocusProxy", "QtWebEngineCore",
+                ]):
+                    continue
+
+                # Si es un QPushButton → eliminar siempre (no debería haber botones en el browser)
+                if isinstance(child, QPB):
+                    print(f"[DEBUG overlay] Eliminando QPushButton: '{child.text()}' "
+                          f"class={class_name} parent={child.parent().metaObject().className() if child.parent() else 'None'}")
+                    child.hide()
+                    child.setParent(None)
+                    child.deleteLater()
+                    continue
+
+                # Buscar widgets con texto sospechoso
+                try:
+                    if hasattr(child, 'text') and callable(child.text):
+                        text = child.text()
+                        if text in ("Cerrar", "Close", "Dismiss"):
+                            print(f"[DEBUG overlay] Eliminando widget con texto '{text}': "
+                                  f"class={class_name}")
+                            child.hide()
+                            child.setParent(None)
+                            child.deleteLater()
+                            continue
+                except Exception:
+                    pass
+
+        except Exception as e:
+            print(f"[DEBUG overlay] Error: {e}")
+
     def _flush_buffer_safe(self):
         """Flush seguro del buffer (llamar SOLO desde fuera de _on_mouse_event)."""
         with self._buffer_lock:
@@ -1136,6 +1338,20 @@ class HCILoggerWindow(QMainWindow):
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # Deshabilitar features de Chromium que generan overlays/popups nativos
+    # (el botón "Cerrar" es un widget nativo que Qt pone sobre la página)
+    sys.argv += [
+        "--disable-features=Accessibility,TranslateUI",
+        "--force-renderer-accessibility=false",
+        "--disable-notifications",
+        "--disable-infobars",
+        "--disable-save-password-bubble",
+        "--disable-translate",
+        "--disable-popup-blocking",
+        "--no-first-run",
+        "--disable-prompt-on-repost",
+    ]
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setFont(QFont("Segoe UI", 10))
