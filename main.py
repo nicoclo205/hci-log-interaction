@@ -2,18 +2,24 @@
 """
 HCI Logger — Estudio de Usabilidad Facebook
 
+Pregunta de investigación:
+  ¿Qué tan fácil es para usuarios jóvenes (20-25 años) sin experiencia previa en
+  Facebook completar el proceso de creación de una fanpage, y en qué etapas del
+  flujo encuentran mayor dificultad para adaptarse a la interfaz de la plataforma?
+
 Captura:
   - Movimientos y clicks del mouse (heatmap)
   - Screenshots en cada click/scroll
-  - Audio del participante + transcripción automática (Whisper)
+  - Audio completo de la sesión (un único archivo WAV)
   - Emociones faciales en tiempo real (DeepFace)
+
+Población objetivo: 20-25 años, sin experiencia previa en Facebook.
 
 Uso:
     python main.py   (desde el entorno hci-env)
 """
 
 import sys
-import time
 import uuid
 import threading
 from pathlib import Path
@@ -21,9 +27,9 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QFrame, QLabel, QPushButton, QRadioButton, QLineEdit, QTextEdit,
-    QButtonGroup, QSizePolicy, QDialog, QTabWidget, QScrollArea,
-    QGridLayout,
+    QFrame, QLabel, QPushButton, QLineEdit, QTextEdit,
+    QSizePolicy, QDialog, QTabWidget, QScrollArea,
+    QGridLayout, QSlider, QFileDialog, QMessageBox,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import QUrl, Qt, Signal, QObject
@@ -42,11 +48,8 @@ from hci_logger.processing.heatmap import HeatmapGenerator
 TARGET_URL = "https://www.facebook.com"
 
 TASKS = {
-    1: "Cambiar la fecha de nacimiento en la cuenta",
-    2: "Eliminar o suspender la cuenta",
+    1: "Crear un fanpage en Facebook",
 }
-
-WHISPER_MODEL = "tiny"   # "tiny" | "base" | "small"
 
 EMOTION_EMOJIS = {
     "happy": "😊", "sad": "😢", "angry": "😠",
@@ -59,7 +62,6 @@ class UISignals(QObject):
     click_count_updated      = Signal(int)
     screenshot_count_updated = Signal(int)
     emotion_updated          = Signal(str)
-    transcription_ready      = Signal(str, int)   # (texto, task_id)
     log_message              = Signal(str)
 
 
@@ -71,17 +73,20 @@ class ReportDialog(QDialog):
     SCREEN_W = 1920
     SCREEN_H = 1080
 
-    def __init__(self, session_id: int, session_uuid: str, db: Database, parent=None):
+    def __init__(self, session_id: int, session_uuid: str, db: Database,
+                 heatmap_path=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Análisis de Sesión")
         self.resize(1050, 750)
         self.setStyleSheet("background: #1e2124; color: #dcddde;")
 
+        self._heatmap_path = heatmap_path   # ruta exacta del heatmap de esta sesión
+        self._players = []                  # QMediaPlayer refs (evitar GC)
+
         # Cargar todos los datos una sola vez
         self._mouse_events   = db.get_mouse_events(session_id)
         self._screenshots    = db.get_screenshots(session_id)
         self._audio_segments = db.get_audio_segments(session_id)
-        self._transcriptions = db.get_transcriptions(session_id)
         self._emotions       = db.get_emotion_events(session_id)
 
         layout = QVBoxLayout(self)
@@ -102,7 +107,7 @@ class ReportDialog(QDialog):
         tabs.addTab(self._build_stats_tab(session_id, db),        "📊 Resumen")
         tabs.addTab(self._build_screenshots_tab(),                 "📸 Capturas")
         tabs.addTab(self._build_heatmap_tab(),                     "🗺 Heatmap General")
-        tabs.addTab(self._build_transcription_tab(),               "📝 Transcripción")
+        tabs.addTab(self._build_audio_tab(),                       "🎵 Audio")
         tabs.addTab(self._build_emotions_tab(session_id, db),      "😊 Emociones")
 
         close_btn = QPushButton("Cerrar")
@@ -127,19 +132,15 @@ class ReportDialog(QDialog):
         clicks  = sum(1 for e in events if e["event_type"] == "click" and e["pressed"])
         moves   = sum(1 for e in events if e["event_type"] == "move")
         scrolls = sum(1 for e in events if e["event_type"] == "scroll")
-        t1_clicks = sum(1 for e in events if e["event_type"] == "click" and e["pressed"] and e.get("task_id") == 1)
-        t2_clicks = sum(1 for e in events if e["event_type"] == "click" and e["pressed"] and e.get("task_id") == 2)
         audio_s = sum(s["duration"] for s in self._audio_segments)
 
         stats = [
+            ("Tarea",                  "T1: Crear un fanpage en Facebook"),
             ("Clicks totales",         str(clicks)),
-            ("  └ T1: Cambiar fecha",  str(t1_clicks)),
-            ("  └ T2: Eliminar cta.",  str(t2_clicks)),
             ("Movimientos de mouse",   f"{moves:,}"),
             ("Scrolls",                str(scrolls)),
             ("Screenshots capturados", str(len(self._screenshots))),
-            ("Audio grabado",          f"{len(self._audio_segments)} segmentos  ({audio_s / 60:.1f} min)"),
-            ("Transcripciones",        str(len(self._transcriptions))),
+            ("Audio grabado",          f"{len(self._audio_segments)} archivo(s)  ({audio_s / 60:.1f} min)"),
             ("Eventos de emoción",     str(len(self._emotions))),
         ]
 
@@ -169,12 +170,27 @@ class ReportDialog(QDialog):
             layout.addWidget(lbl, alignment=Qt.AlignCenter)
             return w
 
+        top_row = QHBoxLayout()
         header = QLabel(
             f"{len(self._screenshots)} capturas  —  "
             f"heatmap de actividad de mouse + círculos rojos = clicks"
         )
         header.setStyleSheet("color: #72767d; font-size: 11px;")
-        layout.addWidget(header)
+        top_row.addWidget(header, stretch=1)
+
+        exp_btn = QPushButton("📁 Exportar capturas…")
+        exp_btn.setFixedHeight(26)
+        exp_btn.setStyleSheet(
+            "QPushButton { background: #4f545c; color: #dcddde; border-radius: 4px; "
+            "font-size: 11px; padding: 0 10px; }"
+            "QPushButton:hover { background: #5d6269; }"
+        )
+        shots = list(self._screenshots)
+        exp_btn.clicked.connect(lambda: self._export_files(
+            [s["file_path"] for s in shots], "capturas"
+        ))
+        top_row.addWidget(exp_btn)
+        layout.addLayout(top_row)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -232,23 +248,35 @@ class ReportDialog(QDialog):
         return w
 
     def _build_heatmap_tab(self) -> QWidget:
-        """Muestra el heatmap general de movimientos y clicks de la sesión."""
+        """Muestra el heatmap de movimientos y clicks de esta sesión."""
         w = QWidget()
         w.setStyleSheet("background: #2f3136;")
         v = QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
 
-        out_dir  = Path("output")
-        heatmaps = sorted(out_dir.glob("heatmap_*.png"), reverse=True) if out_dir.exists() else []
-        img_path = heatmaps[0] if heatmaps else None
+        img_path = Path(self._heatmap_path) if self._heatmap_path else None
 
         if img_path and img_path.exists():
+            # Botón de exportar
+            export_row = QHBoxLayout()
+            export_row.setContentsMargins(8, 8, 8, 4)
+            exp_btn = QPushButton("📁 Exportar heatmap…")
+            exp_btn.setFixedHeight(30)
+            exp_btn.setStyleSheet(
+                "QPushButton { background: #4f545c; color: #dcddde; border-radius: 4px; "
+                "font-size: 12px; padding: 0 12px; }"
+                "QPushButton:hover { background: #5d6269; }"
+            )
+            exp_btn.clicked.connect(lambda: self._export_files([str(img_path)], "heatmap"))
+            export_row.addStretch()
+            export_row.addWidget(exp_btn)
+            v.addLayout(export_row)
+
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setStyleSheet("QScrollArea { border: none; background: #2f3136; }")
             img_label = QLabel()
             pixmap = QPixmap(str(img_path))
-            # Escalar al ancho del diálogo manteniendo relación de aspecto
             img_label.setPixmap(pixmap.scaledToWidth(1020, Qt.SmoothTransformation))
             img_label.setAlignment(Qt.AlignCenter)
             scroll.setWidget(img_label)
@@ -261,32 +289,195 @@ class ReportDialog(QDialog):
 
         return w
 
-    def _build_transcription_tab(self) -> QWidget:
+    def _build_audio_tab(self) -> QWidget:
+        """Reproductor de audio de la sesión + exportación."""
         w = QWidget()
         w.setStyleSheet("background: #2f3136;")
-        v = QVBoxLayout(w)
-        v.setContentsMargins(10, 10, 10, 10)
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setSpacing(10)
 
-        box = QTextEdit()
-        box.setReadOnly(True)
-        box.setStyleSheet(
-            "QTextEdit { background: #23272a; color: #b9ffa0; font-family: Consolas, monospace; "
-            "font-size: 12px; border: none; }"
-        )
+        if not self._audio_segments:
+            lbl = QLabel("No hay audio grabado en esta sesión.")
+            lbl.setStyleSheet("color: #72767d; font-size: 13px;")
+            lbl.setAlignment(Qt.AlignCenter)
+            outer.addWidget(lbl, alignment=Qt.AlignCenter)
+            return w
 
-        if self._transcriptions:
-            for t in self._transcriptions:
-                ts  = datetime.fromtimestamp(t["timestamp"]).strftime("%H:%M:%S")
-                tid = t["task_id"]
-                box.append(
-                    f'<span style="color:#72767d">[{ts} T{tid}]</span>'
-                    f'<span style="color:#b9ffa0"> {t["text"]}</span>'
+        # Importar multimedia (opcional — falla silenciosamente)
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+            multimedia_ok = True
+        except ImportError:
+            multimedia_ok = False
+
+        for seg in self._audio_segments:
+            file_path = Path(seg["file_path"])
+            dur_min  = seg["duration"] / 60
+            size_kb  = seg["file_size"] / 1024
+
+            card = QFrame()
+            card.setStyleSheet(
+                "QFrame { background: #23272a; border-radius: 6px; padding: 6px; }"
+            )
+            card_v = QVBoxLayout(card)
+            card_v.setSpacing(6)
+
+            # ── Info ──
+            info_row = QHBoxLayout()
+            fname_lbl = QLabel(file_path.name)
+            fname_lbl.setStyleSheet("color: #dcddde; font-size: 12px; font-weight: bold;")
+            info_row.addWidget(fname_lbl)
+            meta_lbl = QLabel(
+                f"  {dur_min:.1f} min  ·  {size_kb:.0f} KB  ·  {seg['sample_rate']} Hz"
+            )
+            meta_lbl.setStyleSheet("color: #72767d; font-size: 11px;")
+            info_row.addWidget(meta_lbl)
+            info_row.addStretch()
+            card_v.addLayout(info_row)
+
+            # ── Controles de reproducción ──
+            if multimedia_ok and file_path.exists():
+                player = QMediaPlayer()
+                audio_out = QAudioOutput()
+                audio_out.setVolume(1.0)
+                player.setAudioOutput(audio_out)
+                player.setSource(QUrl.fromLocalFile(str(file_path.resolve())))
+                self._players.append((player, audio_out))
+
+                ctrl_row = QHBoxLayout()
+                ctrl_row.setSpacing(8)
+
+                btn_play = QPushButton("▶ Play")
+                btn_play.setFixedWidth(90)
+                btn_play.setStyleSheet(
+                    "QPushButton { background: #43b581; color: white; border-radius: 4px; "
+                    "font-size: 12px; padding: 4px 8px; }"
+                    "QPushButton:hover { background: #3ca374; }"
                 )
-        else:
-            box.setPlaceholderText("Sin transcripciones en esta sesión.")
 
-        v.addWidget(box)
+                btn_stop = QPushButton("⏹ Stop")
+                btn_stop.setFixedWidth(90)
+                btn_stop.setStyleSheet(
+                    "QPushButton { background: #4f545c; color: #dcddde; border-radius: 4px; "
+                    "font-size: 12px; padding: 4px 8px; }"
+                    "QPushButton:hover { background: #5d6269; }"
+                )
+
+                slider = QSlider(Qt.Horizontal)
+                slider.setRange(0, 0)
+                slider.setStyleSheet(
+                    "QSlider::groove:horizontal { height: 4px; background: #40444b; border-radius: 2px; }"
+                    "QSlider::handle:horizontal { width: 12px; height: 12px; margin: -4px 0; "
+                    "background: #7289da; border-radius: 6px; }"
+                    "QSlider::sub-page:horizontal { background: #7289da; border-radius: 2px; }"
+                )
+
+                pos_lbl = QLabel("0:00 / 0:00")
+                pos_lbl.setStyleSheet("color: #72767d; font-size: 11px; min-width: 80px;")
+                pos_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+                # Closures para conectar señales correctamente por iteración
+                def _make_play_cb(p, btn):
+                    def cb():
+                        from PySide6.QtMultimedia import QMediaPlayer as _MP
+                        if p.playbackState() == _MP.PlaybackState.PlayingState:
+                            p.pause()
+                            btn.setText("▶ Play")
+                        else:
+                            p.play()
+                            btn.setText("⏸ Pausa")
+                    return cb
+
+                def _make_stop_cb(p, btn):
+                    def cb():
+                        p.stop()
+                        btn.setText("▶ Play")
+                    return cb
+
+                def _make_pos_cb(sl, lbl, p):
+                    def cb(pos):
+                        if not sl.isSliderDown():
+                            sl.setValue(pos)
+                        dur = p.duration()
+                        ps, ds = pos // 1000, dur // 1000
+                        lbl.setText(f"{ps//60}:{ps%60:02d} / {ds//60}:{ds%60:02d}")
+                    return cb
+
+                def _make_dur_cb(sl):
+                    def cb(dur):
+                        sl.setRange(0, dur)
+                    return cb
+
+                def _make_seek_cb(p):
+                    def cb(val):
+                        p.setPosition(val)
+                    return cb
+
+                btn_play.clicked.connect(_make_play_cb(player, btn_play))
+                btn_stop.clicked.connect(_make_stop_cb(player, btn_play))
+                player.positionChanged.connect(_make_pos_cb(slider, pos_lbl, player))
+                player.durationChanged.connect(_make_dur_cb(slider))
+                slider.sliderMoved.connect(_make_seek_cb(player))
+
+                ctrl_row.addWidget(btn_play)
+                ctrl_row.addWidget(btn_stop)
+                ctrl_row.addWidget(slider, stretch=1)
+                ctrl_row.addWidget(pos_lbl)
+                card_v.addLayout(ctrl_row)
+
+            elif not file_path.exists():
+                warn = QLabel(f"Archivo no encontrado: {file_path}")
+                warn.setStyleSheet("color: #f04747; font-size: 11px;")
+                card_v.addWidget(warn)
+            else:
+                warn = QLabel("Reproducción no disponible (PySide6.QtMultimedia no encontrado).")
+                warn.setStyleSheet("color: #72767d; font-size: 11px;")
+                card_v.addWidget(warn)
+
+            outer.addWidget(card)
+
+        outer.addStretch()
+
+        # ── Botón exportar ──
+        segs = list(self._audio_segments)
+        exp_btn = QPushButton("📁 Exportar audio(s) a carpeta…")
+        exp_btn.setFixedHeight(36)
+        exp_btn.setStyleSheet(
+            "QPushButton { background: #7289da; color: white; border-radius: 6px; "
+            "font-size: 13px; padding: 0 16px; }"
+            "QPushButton:hover { background: #677bc4; }"
+        )
+        exp_btn.clicked.connect(lambda: self._export_files(
+            [s["file_path"] for s in segs], "audio"
+        ))
+        outer.addWidget(exp_btn)
+
         return w
+
+    # ── Exportación genérica ──────────────────────────────────────────────────
+
+    def _export_files(self, file_paths: list, kind: str = "archivos"):
+        """Copia una lista de archivos a una carpeta elegida por el usuario."""
+        import shutil
+        folder = QFileDialog.getExistingDirectory(
+            self, f"Seleccionar carpeta de destino para {kind}", str(Path.home())
+        )
+        if not folder:
+            return
+        dest = Path(folder)
+        copied, missing = 0, 0
+        for fp in file_paths:
+            src = Path(fp)
+            if src.exists():
+                shutil.copy2(src, dest / src.name)
+                copied += 1
+            else:
+                missing += 1
+        msg = f"{copied} archivo(s) copiados a:\n{folder}"
+        if missing:
+            msg += f"\n\n({missing} archivo(s) no encontrado(s))"
+        QMessageBox.information(self, "Exportación completada", msg)
 
     def _build_emotions_tab(self, session_id: int, db: Database) -> QWidget:
         w = QWidget()
@@ -488,19 +679,14 @@ class HCILoggerWindow(QMainWindow):
         self.audio_tracker      = None
         self.emotion_tracker    = None
 
+        self._last_heatmap_path = None   # ruta del heatmap de la sesión más reciente
+
         # Buffer de mouse – NOTA: flush se extrae fuera del lock para evitar deadlock
         self._event_buffer = []
         self._buffer_lock  = threading.Lock()
         self._BUFFER_SIZE  = 50
 
-        # Control de hilos de transcripción
-        self._stopping             = False
-        self._transcription_threads: list[threading.Thread] = []
-        self._threads_lock         = threading.Lock()
-
-        # Whisper (carga lazy)
-        self._whisper_model = None
-        self._whisper_lock  = threading.Lock()
+        self._stopping = False
 
         self._build_ui()
         self._connect_signals()
@@ -550,33 +736,27 @@ class HCILoggerWindow(QMainWindow):
         col1.addWidget(lbl_part)
         col1.addWidget(self.input_participant)
 
-        lbl_task = QLabel("Tarea actual")
+        lbl_task = QLabel("Tarea")
         lbl_task.setStyleSheet("color: #72767d; font-size: 11px; font-weight: bold; margin-top: 3px;")
         col1.addWidget(lbl_task)
 
-        self.task_group = QButtonGroup(self)
-        for tid, text in TASKS.items():
-            rb = QRadioButton(f"T{tid}: {text}")
-            rb.setStyleSheet(
-                "QRadioButton { color: #dcddde; font-size: 12px; }"
-                "QRadioButton::indicator { width: 13px; height: 13px; }"
-            )
-            rb.setChecked(tid == 1)
-            rb.toggled.connect(
-                lambda checked, t=tid: self._on_task_changed(t) if checked else None
-            )
-            self.task_group.addButton(rb, tid)
-            col1.addWidget(rb)
+        task_lbl = QLabel(f"T1: {TASKS[1]}")
+        task_lbl.setStyleSheet(
+            "color: #b9ffa0; font-size: 12px; font-weight: bold; "
+            "background: #2f3136; border-radius: 4px; padding: 4px 8px;"
+        )
+        task_lbl.setWordWrap(True)
+        col1.addWidget(task_lbl)
 
         col1.addStretch()
         layout.addLayout(col1)
         layout.addWidget(self._vline())
 
-        # Col 2 – Transcripción
+        # Col 2 – Log / Estado
         col2 = QVBoxLayout()
         col2.setSpacing(4)
 
-        lbl_tr = QLabel("Transcripción de voz  (Whisper)")
+        lbl_tr = QLabel("Estado / Log")
         lbl_tr.setStyleSheet("color: #72767d; font-size: 11px; font-weight: bold;")
         col2.addWidget(lbl_tr)
 
@@ -586,7 +766,7 @@ class HCILoggerWindow(QMainWindow):
             "QTextEdit { background: #2f3136; color: #b9ffa0; font-family: Consolas, monospace; "
             "font-size: 12px; border: 1px solid #40444b; border-radius: 4px; padding: 4px; }"
         )
-        self.transcription_box.setPlaceholderText("La transcripción aparecerá aquí mientras graba…")
+        self.transcription_box.setPlaceholderText("Los eventos de sesión aparecerán aquí…")
         col2.addWidget(self.transcription_box, stretch=1)
 
         layout.addLayout(col2, stretch=1)
@@ -675,21 +855,11 @@ class HCILoggerWindow(QMainWindow):
             lambda n: self.metric_shots.value_label.setText(f"📸 {n}")
         )
         self.signals.emotion_updated.connect(self._display_emotion)
-        self.signals.transcription_ready.connect(self._append_transcription)
         self.signals.log_message.connect(self._append_log)
 
     def _display_emotion(self, emotion: str):
         emoji = EMOTION_EMOJIS.get(emotion, "😐")
         self.metric_emotion.value_label.setText(f"{emoji} {emotion[:7]}")
-
-    def _append_transcription(self, text: str, task_id: int):
-        ts = datetime.now().strftime("%H:%M:%S")
-        self.transcription_box.append(
-            f'<span style="color:#f0f0f0">[{ts} T{task_id}]</span>'
-            f'<span style="color:#b9ffa0"> {text}</span>'
-        )
-        sb = self.transcription_box.verticalScrollBar()
-        sb.setValue(sb.maximum())
 
     def _append_log(self, msg: str):
         ts = datetime.now().strftime("%H:%M:%S")
@@ -713,7 +883,7 @@ class HCILoggerWindow(QMainWindow):
         self.session_id   = self.db.create_session(
             session_uuid=self.session_uuid,
             participant_id=participant,
-            experiment_id="facebook_usability_v1",
+            experiment_id="facebook_fanpage_v1",
             target_url=TARGET_URL,
             screen_width=1920,
             screen_height=1080,
@@ -746,13 +916,13 @@ class HCILoggerWindow(QMainWindow):
         )
         self.screenshot_tracker.start()
 
-        # 3. Audio (opcional)
+        # 3. Audio (opcional) — graba toda la sesión como un único archivo
         try:
             self.audio_tracker = AudioTrackerAsync(
                 session_id=self.session_id,
                 on_segment_callback=self._on_audio_segment,
                 output_dir=audio_dir,
-                segment_duration=30,
+                segment_duration=9999,   # sin cortes: se guarda todo al finalizar
                 sample_rate=16000,
                 channels=1,
             )
@@ -800,16 +970,6 @@ class HCILoggerWindow(QMainWindow):
 
         # Flush final del buffer de mouse
         self._flush_buffer_safe()
-
-        # Esperar hilos de transcripción activos (máx 60s en total)
-        with self._threads_lock:
-            pending = list(self._transcription_threads)
-        if pending:
-            self.signals.log_message.emit(
-                f"Esperando {len(pending)} transcripción(es) pendiente(s)…"
-            )
-            for t in pending:
-                t.join(timeout=60)
 
         if self.session_id:
             self.db.end_session(self.session_id)
@@ -881,7 +1041,6 @@ class HCILoggerWindow(QMainWindow):
         self.signals.screenshot_count_updated.emit(count)
 
     def _on_audio_segment(self, segment: dict):
-        task_id = self.current_task_id
         self.db.insert_audio_segment(
             session_id=segment["session_id"],
             start_timestamp=segment["start_timestamp"],
@@ -891,17 +1050,12 @@ class HCILoggerWindow(QMainWindow):
             sample_rate=segment["sample_rate"],
             channels=segment["channels"],
             file_size=segment["file_size"],
-            task_id=task_id,
+            task_id=self.current_task_id,
         )
-        # Lanzar transcripción en hilo separado
-        t = threading.Thread(
-            target=self._transcribe,
-            args=(segment["file_path"], task_id),
-            daemon=True,
+        dur_min = segment["duration"] / 60
+        self.signals.log_message.emit(
+            f"Audio guardado → {segment['file_path']}  ({dur_min:.1f} min)"
         )
-        with self._threads_lock:
-            self._transcription_threads.append(t)
-        t.start()
 
     def _on_emotion(self, data: dict):
         self.db.insert_emotion_event(
@@ -922,74 +1076,7 @@ class HCILoggerWindow(QMainWindow):
         )
         self.signals.emotion_updated.emit(data["dominant_emotion"])
 
-    # ── Whisper ───────────────────────────────────────────────────────────────
-
-    def _get_whisper(self):
-        with self._whisper_lock:
-            if self._whisper_model is None:
-                self.signals.log_message.emit(f"Cargando modelo Whisper '{WHISPER_MODEL}'…")
-                import whisper
-                self._whisper_model = whisper.load_model(WHISPER_MODEL)
-                self.signals.log_message.emit("Whisper listo.")
-            return self._whisper_model
-
-    def _transcribe(self, file_path: str, task_id: int):
-        try:
-            model    = self._get_whisper()
-            abs_path = str(Path(file_path).resolve())
-
-            # Intentar transcripción normal (usa ffmpeg si está disponible)
-            try:
-                result = model.transcribe(abs_path, language="es")
-            except Exception as ffmpeg_err:
-                # Fallback: cargar audio con soundfile y pasar numpy array a Whisper
-                self.signals.log_message.emit(
-                    f"ffmpeg no disponible, usando fallback numpy ({ffmpeg_err})"
-                )
-                import soundfile as sf
-                import numpy as np
-                audio_np, sr = sf.read(abs_path, dtype="float32", always_2d=False)
-                # Whisper espera mono 16 kHz
-                if audio_np.ndim == 2:
-                    audio_np = audio_np.mean(axis=1)
-                if sr != 16000:
-                    # Resample simple (lineal) — suficiente para voz
-                    import scipy.signal as sig
-                    audio_np = sig.resample_poly(
-                        audio_np, 16000, sr
-                    ).astype(np.float32)
-                result = model.transcribe(audio_np, language="es")
-
-            text = result.get("text", "").strip()
-            if not text:
-                return
-
-            # Guardar en DB (la sesión puede estar cerrándose, pero la DB sigue abierta)
-            if self.session_id:
-                try:
-                    self.db.insert_transcription(
-                        session_id=self.session_id,
-                        task_id=task_id,
-                        timestamp=time.time(),
-                        text=text,
-                        audio_file=file_path,
-                    )
-                except Exception:
-                    pass  # DB ya cerrada
-            self.signals.transcription_ready.emit(text, task_id)
-        except Exception as e:
-            self.signals.log_message.emit(f"⚠ Error transcribiendo: {e}")
-        finally:
-            with self._threads_lock:
-                t = threading.current_thread()
-                if t in self._transcription_threads:
-                    self._transcription_threads.remove(t)
-
     # ── Helpers ───────────────────────────────────────────────────────────────
-
-    def _on_task_changed(self, task_id: int):
-        self.current_task_id = task_id
-        self.signals.log_message.emit(f"Tarea activa → T{task_id}: {TASKS[task_id]}")
 
     def _flush_buffer_safe(self):
         """Flush seguro del buffer (llamar SOLO desde fuera de _on_mouse_event)."""
@@ -1005,9 +1092,11 @@ class HCILoggerWindow(QMainWindow):
         ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
         out = Path("output")
         out.mkdir(exist_ok=True)
+        heatmap_file = out / f"heatmap_{ts}.png"
         gen = HeatmapGenerator(screen_width=1920, screen_height=1080)
-        gen.generate_from_events(events, out / f"heatmap_{ts}.png")
-        self.signals.log_message.emit(f"Heatmap → output/heatmap_{ts}.png")
+        gen.generate_from_events(events, heatmap_file)
+        self._last_heatmap_path = heatmap_file
+        self.signals.log_message.emit(f"Heatmap → {heatmap_file}")
 
     def _show_report(self):
         if self.session_id is None:
@@ -1015,7 +1104,11 @@ class HCILoggerWindow(QMainWindow):
         # Reabrir DB en modo lectura para el reporte
         report_db = Database()
         report_db.initialize()
-        dlg = ReportDialog(self.session_id, self.session_uuid, report_db, parent=self)
+        dlg = ReportDialog(
+            self.session_id, self.session_uuid, report_db,
+            heatmap_path=self._last_heatmap_path,
+            parent=self,
+        )
         dlg.exec()
         report_db.close()
 
